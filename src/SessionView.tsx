@@ -1,39 +1,41 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type { Answer, FileDiff, Phase, PlanStep, Question, SessionEvent, Step } from "./types";
+import { useEffect, useReducer, useRef, useState } from "react";
+import type { Answer, Phase, PlanStep, Question, SessionEvent, Step } from "./types";
 import { Markdown } from "./components/Markdown";
-import { Visuals } from "./components/Visuals";
-import { DiffView } from "./components/DiffView";
+import { Blocks } from "./components/Blocks";
 
 interface State {
   title: string;
   description?: string;
-  repo: string;
-  files: FileDiff[];
+  fileCount: number;
+  additions: number;
+  deletions: number;
   overview: string;
   plan: PlanStep[];
-  skipped: string[];
   steps: Step[];
   questions: Question[];
   answers: Record<string, Answer>;
-  busy: boolean;
-  busyLabel?: string;
-  activity: string[];
+  waiting: boolean;
+  label?: string;
+  aiWorking: boolean;
+  prepared: number;
+  activity?: string;
   phase: Phase;
   errors: string[];
 }
 
 const init: State = {
   title: "",
-  repo: "",
-  files: [],
+  fileCount: 0,
+  additions: 0,
+  deletions: 0,
   overview: "",
   plan: [],
-  skipped: [],
   steps: [],
   questions: [],
   answers: {},
-  busy: false,
-  activity: [],
+  waiting: true,
+  aiWorking: true,
+  prepared: 0,
   phase: "planning",
   errors: [],
 };
@@ -43,13 +45,13 @@ function reducer(s: State, e: SessionEvent | { type: "reset" }): State {
     case "reset":
       return init;
     case "meta":
-      return { ...s, title: e.title, description: e.description, files: e.files, repo: e.repo };
-    case "busy":
-      return { ...s, busy: e.busy, busyLabel: e.label, activity: e.busy ? [] : s.activity };
+      return { ...s, title: e.title, description: e.description, fileCount: e.fileCount, additions: e.additions, deletions: e.deletions };
+    case "status":
+      return { ...s, waiting: e.waiting, label: e.label, aiWorking: e.aiWorking, prepared: e.prepared };
     case "activity":
-      return { ...s, activity: [...s.activity.slice(-4), e.text] };
+      return { ...s, activity: e.text };
     case "plan":
-      return { ...s, overview: e.overview, plan: e.steps, skipped: e.skipped_hunks };
+      return { ...s, overview: e.overview, plan: e.steps };
     case "step": {
       const { type, ...step } = e;
       return { ...s, steps: [...s.steps.filter((x) => x.index !== step.index), step].sort((a, b) => a.index - b.index) };
@@ -58,7 +60,11 @@ function reducer(s: State, e: SessionEvent | { type: "reset" }): State {
       return { ...s, questions: [...s.questions, e.question] };
     case "answer": {
       const { type, ...a } = e;
-      return { ...s, answers: { ...s.answers, [a.questionId]: a } };
+      return {
+        ...s,
+        answers: { ...s.answers, [a.questionId]: a },
+        questions: s.questions.map((q) => (q.id === a.questionId ? { ...q, answered: true } : q)),
+      };
     }
     case "phase":
       return { ...s, phase: e.phase };
@@ -70,9 +76,9 @@ function reducer(s: State, e: SessionEvent | { type: "reset" }): State {
 export function SessionView({ id, onExit }: { id: string; onExit: () => void }) {
   const [s, dispatch] = useReducer(reducer, init);
   const [view, setView] = useState<number | "qa">(0);
-  const [follow, setFollow] = useState(true);
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"now" | "later">("now");
+  const [requested, setRequested] = useState(false);
   const mainRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -83,38 +89,32 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
     return () => es.close();
   }, [id]);
 
-  // Follow the newest step / QA
-  const lastStep = s.steps.length ? s.steps[s.steps.length - 1].index : 0;
+  const lastStep = s.steps.length ? s.steps[s.steps.length - 1].index : -1;
+  const total = s.plan.length;
+
+  // A newly revealed step always becomes the view (it only arrives after OK).
   useEffect(() => {
-    if (follow) setView(lastStep);
-  }, [lastStep, follow]);
+    if (lastStep >= 0) setView(lastStep);
+    setRequested(false);
+  }, [lastStep]);
   useEffect(() => {
-    if (s.phase === "final_qa" || s.phase === "finished") {
-      if (s.questions.some((q) => q.mode === "later")) setView("qa");
-    }
+    if ((s.phase === "final_qa" || s.phase === "finished") && s.questions.some((q) => q.mode === "later")) setView("qa");
   }, [s.phase]);
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
   }, [view]);
 
   const step = typeof view === "number" ? s.steps.find((x) => x.index === view) : undefined;
-  const total = s.plan.length;
-  const isLast = s.steps.length > 0 && lastStep === total - 1;
+  const reviewing = typeof view === "number" && view < lastStep;
+  const isLast = lastStep >= 0 && lastStep === total - 1;
   const laterPending = s.questions.filter((q) => q.mode === "later" && !q.answered);
-  const nextQueued = useRef(false);
-  useEffect(() => {
-    nextQueued.current = false;
-  }, [lastStep, s.phase]);
 
   async function next() {
-    if (view !== lastStep && typeof view === "number" && view < lastStep) {
-      setView(view + 1);
-      return;
-    }
-    if (nextQueued.current || s.phase !== "stepping") return;
-    nextQueued.current = true;
-    setFollow(true);
+    if (reviewing) return setView((view as number) + 1);
+    if (view === "qa" || requested || s.phase !== "stepping" || lastStep < 0) return;
+    setRequested(true);
     await fetch(`/api/sessions/${id}/next`, { method: "POST" });
+    if (isLast) setRequested(false);
   }
 
   async function ask() {
@@ -128,7 +128,6 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
     });
   }
 
-  // Keyboard: Enter / → for OK, ← for back
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
@@ -136,9 +135,9 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
       if (e.key === "ArrowRight" || e.key === "Enter") {
         e.preventDefault();
         next();
-      } else if (e.key === "ArrowLeft" && typeof view === "number" && view > 0) {
-        setFollow(false);
-        setView(view - 1);
+      } else if (e.key === "ArrowLeft") {
+        if (view === "qa") setView(lastStep);
+        else if (typeof view === "number" && view > 0) setView(view - 1);
       } else if (e.key === "/" || e.key === "?") {
         e.preventDefault();
         inputRef.current?.focus();
@@ -149,18 +148,23 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
   });
 
   const stepQuestions = (idx: number) => s.questions.filter((q) => q.afterStep === idx && q.mode === "now");
-  const shown = new Set(s.steps.map((x) => x.index));
 
-  const okLabel = useMemo(() => {
-    if (typeof view === "number" && view < lastStep) return "次のステップへ →";
-    if (s.phase === "planning") return "準備中…";
-    if (s.phase === "final_qa") return "質問に回答中…";
-    if (s.phase === "finished") return "完了";
-    if (isLast) return laterPending.length ? `OK、まとめて質問 (${laterPending.length}) →` : "OK、完了 ✓";
-    return "OK、次へ →";
-  }, [view, lastStep, s.phase, isLast, laterPending.length]);
-  const okDisabled =
-    !(typeof view === "number" && view < lastStep) && (s.phase !== "stepping" || s.busy || s.steps.length === 0);
+  let okLabel = "OK、次へ →";
+  if (reviewing) okLabel = "次のステップへ →";
+  else if (s.phase === "planning" || lastStep < 0) okLabel = "準備中…";
+  else if (s.phase === "final_qa") okLabel = "質問に回答中…";
+  else if (s.phase === "finished") okLabel = "完了";
+  else if (requested) okLabel = "準備中…";
+  else if (isLast) okLabel = laterPending.length ? `OK、まとめて質問 (${laterPending.length}) →` : "OK、完了 ✓";
+  const okDisabled = !reviewing && (s.phase !== "stepping" || lastStep < 0 || requested || view === "qa");
+
+  // group plan by section
+  const sections: { name: string; items: { p: PlanStep; i: number }[] }[] = [];
+  s.plan.forEach((p, i) => {
+    const last = sections[sections.length - 1];
+    if (last && last.name === p.section) last.items.push({ p, i });
+    else sections.push({ name: p.section, items: [{ p, i }] });
+  });
 
   return (
     <div className="session">
@@ -172,11 +176,15 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
           <span className="logo">xpl</span> {s.title}
         </div>
         <div className="topbar-stat muted">
-          {s.files.length} files ·{" "}
-          <span className="plus">+{s.files.reduce((a, f) => a + f.additions, 0)}</span>{" "}
-          <span className="minus">-{s.files.reduce((a, f) => a + f.deletions, 0)}</span>
+          {s.fileCount} files · <span className="plus">+{s.additions}</span> <span className="minus">-{s.deletions}</span>
         </div>
       </header>
+
+      {total > 0 && (
+        <div className="progress">
+          <div className="progress-bar" style={{ width: `${((lastStep + 1) / total) * 100}%` }} />
+        </div>
+      )}
 
       <div className="layout">
         <aside className="sidebar">
@@ -187,30 +195,33 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
             </section>
           )}
           <section>
-            <h3>ステップ {total ? `(${s.steps.length}/${total})` : ""}</h3>
+            <h3>ステップ {total ? `${lastStep + 1} / ${total}` : ""}</h3>
             {!total && <div className="muted small">プラン作成中…</div>}
-            <ol className="steps">
-              {s.plan.map((p, i) => (
-                <li
-                  key={i}
-                  className={`${shown.has(i) ? "done" : ""} ${view === i ? "current" : ""}`}
-                  onClick={() => {
-                    if (!shown.has(i)) return;
-                    setFollow(i === lastStep);
-                    setView(i);
-                  }}
-                  title={p.summary}
-                >
-                  <span className="num">{i + 1}</span>
-                  <span className="t">{p.title}</span>
-                  {stepQuestions(i).length > 0 && <span className="qbadge">Q{stepQuestions(i).length}</span>}
-                </li>
-              ))}
-            </ol>
+            {sections.map((sec, si) => (
+              <div key={si} className="section">
+                <div className="section-name">{sec.name}</div>
+                <ol className="steps">
+                  {sec.items.map(({ p, i }) => {
+                    const shown = i <= lastStep;
+                    return (
+                      <li
+                        key={i}
+                        className={`${shown ? "done" : ""} ${view === i ? "current" : ""}`}
+                        onClick={() => shown && setView(i)}
+                      >
+                        <span className="num">{i + 1}</span>
+                        <span className="t">{p.title}</span>
+                        {stepQuestions(i).length > 0 && <span className="qbadge">Q{stepQuestions(i).length}</span>}
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            ))}
           </section>
           {s.questions.some((q) => q.mode === "later") && (
             <section>
-              <h3 className="clickable" onClick={() => setView("qa")}>
+              <h3 className="clickable" onClick={() => (s.phase === "final_qa" || s.phase === "finished") && setView("qa")}>
                 あとで聞く質問 ({s.questions.filter((q) => q.mode === "later").length})
               </h3>
               <ul className="later-list">
@@ -227,66 +238,58 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
         </aside>
 
         <main className="main" ref={mainRef}>
-          {s.errors.map((e, i) => (
-            <div key={i} className="error">
-              {e}
-            </div>
-          ))}
-          {view === "qa" ? (
-            <div className="qa-summary">
-              <h2>まとめて質問への回答</h2>
-              {s.questions
-                .filter((q) => q.mode === "later" || q.afterStep >= total)
-                .map((q) => (
-                  <QA key={q.id} q={q} a={s.answers[q.id]} files={s.files} />
-                ))}
-              {s.phase === "finished" && <div className="finished">🎉 すべての解説が完了しました</div>}
-            </div>
-          ) : step ? (
-            <article className="step" key={step.index}>
-              <div className="step-head">
+          <div className="column">
+            {s.errors.map((e, i) => (
+              <div key={i} className="error">
+                {e}
+              </div>
+            ))}
+            {view === "qa" ? (
+              <div className="qa-summary">
+                <h2>まとめて質問への回答</h2>
+                {s.questions
+                  .filter((q) => q.mode === "later")
+                  .map((q) => (
+                    <QA key={q.id} q={q} a={s.answers[q.id]} />
+                  ))}
+                {s.phase === "finished" && <div className="finished">すべての解説が完了しました</div>}
+              </div>
+            ) : step ? (
+              <article className="step" key={step.index}>
                 <div className="step-num">
-                  STEP {step.index + 1} / {total}
+                  {s.plan[step.index]?.section} · {step.index + 1} / {total}
                 </div>
                 <h2>{step.title}</h2>
+                <Blocks blocks={step.blocks} />
+                {stepQuestions(step.index).map((q) => (
+                  <QA key={q.id} q={q} a={s.answers[q.id]} />
+                ))}
+                {s.phase === "finished" && step.index === total - 1 && <div className="finished">すべての解説が完了しました</div>}
+              </article>
+            ) : (
+              <div className="placeholder">
+                <div className="spinner" />
+                <div>{s.label ?? "準備中…"}</div>
+                {s.activity && <div className="muted small">{s.activity}</div>}
               </div>
-              <div className={"step-body " + (step.hunk_ids.length ? "split" : "")}>
-                <div className="explain">
-                  <Markdown text={step.markdown} />
-                  <Visuals visuals={step.visuals} />
-                  {stepQuestions(step.index).map((q) => (
-                    <QA key={q.id} q={q} a={s.answers[q.id]} files={s.files} />
-                  ))}
-                </div>
-                {step.hunk_ids.length > 0 && (
-                  <div className="code-pane">
-                    <DiffView files={s.files} hunkIds={step.hunk_ids} ranges={step.line_ranges} />
-                  </div>
-                )}
-              </div>
-              {s.phase === "finished" && step.index === total - 1 && <div className="finished">🎉 すべての解説が完了しました</div>}
-            </article>
-          ) : (
-            <div className="placeholder">
-              <div className="spinner" />
-              <div>{s.busyLabel ?? "準備中…"}</div>
-              {s.description && <pre className="desc">{s.description.slice(0, 1200)}</pre>}
-            </div>
-          )}
+            )}
+          </div>
         </main>
       </div>
 
       <footer className="actionbar">
         <div className="status">
-          {s.busy ? (
+          {s.waiting ? (
             <>
-              <span className="dot busy" /> {s.busyLabel}
-              {s.activity.length > 0 && <span className="muted"> · {s.activity[s.activity.length - 1]}</span>}
+              <span className="dot busy" /> {s.label}
+              {s.activity && <span className="muted"> · {s.activity}</span>}
             </>
           ) : (
             <>
               <span className="dot" /> {s.phase === "finished" ? "完了" : "待機中"}
-              <span className="muted"> · Enter/→ で次へ、/ で質問</span>
+              {s.aiWorking && s.phase === "stepping" && <span className="muted"> · 次のステップを先読み中</span>}
+              {!s.aiWorking && s.prepared > 0 && <span className="muted"> · {s.prepared} ステップ準備済み</span>}
+              <span className="muted"> · Enter/→ 次へ　← 戻る　/ 質問</span>
             </>
           )}
         </div>
@@ -325,7 +328,7 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
   );
 }
 
-function QA({ q, a, files }: { q: Question; a?: Answer; files: FileDiff[] }) {
+function QA({ q, a }: { q: Question; a?: Answer }) {
   return (
     <div className="qa">
       <div className="q">
@@ -333,9 +336,7 @@ function QA({ q, a, files }: { q: Question; a?: Answer; files: FileDiff[] }) {
       </div>
       {a ? (
         <div className="a">
-          <Markdown text={a.markdown} />
-          <Visuals visuals={a.visuals} />
-          {a.hunk_ids.length > 0 && <DiffView files={files} hunkIds={a.hunk_ids} />}
+          <Blocks blocks={a.blocks} />
         </div>
       ) : (
         <div className="a muted">{q.mode === "later" ? "最後にまとめて回答します" : "回答を待っています…"}</div>

@@ -3,33 +3,55 @@ import { annotatedDiff, fileSummary } from "./git.js";
 
 export const INLINE_DIFF_LIMIT = 120_000;
 
+export const LIMITS = {
+  stepCodeLines: 20, // what we ask for
+  stepCodeLinesHard: 28, // what we enforce
+  answerCodeLinesHard: 45,
+};
+
+export function proseLimits(lang: string) {
+  const cjk = /日本|中文|한국|Japanese|Chinese|Korean/i.test(lang);
+  return cjk ? { soft: 200, hard: 360, answerHard: 900 } : { soft: 450, hard: 850, answerHard: 2000 };
+}
+
 export function systemPrompt(lang: string) {
-  return `You are "xpl", a patient senior engineer who walks a human reviewer through a code diff, one small step at a time, in a GUI.
-The human wants to understand AI-generated (often large) changes quickly but with HIGH resolution: what changed, why it matters, how the pieces connect, and what to watch out for.
+  const p = proseLimits(lang);
+  return `You are "xpl". You guide a human through a code diff in a GUI, in very small bites, so they understand AI-generated changes quickly and precisely.
+Human understanding comes first. Small, digestible steps beat complete-but-overwhelming ones.
 
-## How the session works
-1. First you study the diff (and, when useful, read surrounding code with Read/Grep/Glob — the working directory is the repository root).
-2. You call \`submit_plan\` with an ordered list of steps. Order steps for understanding, not file order: start with the big picture / entry points / data model, then core logic, then call sites, then tests/config/trivia. Group related hunks across files. Every hunk should belong to some step, or be listed in \`skipped_hunks\` (only for truly trivial noise like lockfiles or formatting).
-   Aim for steps that take 30–90 seconds to read. Typically 4–15 steps; more for very large diffs.
-3. Then you call \`present_step\` for ONE step at a time. After each present_step call, END YOUR TURN and wait. The human presses OK to request the next step.
-4. The human may ask questions. Each question has an id. Answer it with \`answer_question\` (one call per question), then end your turn. Do not advance to the next step while answering.
-5. At the end, deferred questions are sent together; answer each with \`answer_question\`.
+## Session flow
+1. Study the diff (read surrounding code with Read/Grep/Glob if useful; cwd is the repo root).
+2. Call \`submit_plan\`: an ordered list of small steps, grouped into sections. Order for understanding (big picture → data model → core logic → callers → tests/config), not file order.
+   - Each step covers AT MOST ~${LIMITS.stepCodeLines} lines of code. Split big hunks across several steps with \`line_ranges\`.
+   - A step may also be code-free (e.g. one diagram of the overall structure). Start with such an overview step.
+   - Repetitive/boilerplate code: one step showing a representative ≤${LIMITS.stepCodeLines}-line sample, and say the rest follows the same pattern. Truly trivial hunks (lockfiles, formatting) go into \`skipped_hunks\`.
+3. Then the GUI asks you to prepare steps one at a time ("Prepare step N"). For each, call \`present_step\` exactly once and end your turn. Steps are prepared ahead of time while the human reads, so do not refer to "the question you just asked" in steps.
+4. Questions come with ids. Answer with \`answer_question\` and end your turn. Never present steps in a question turn.
+5. Deferred questions arrive together at the end; answer each with \`answer_question\`.
 
-## Writing a step
-- \`markdown\`: concise, concrete explanation. Lead with the one-sentence gist. Then bullets: what changed, why/how it works, how it connects to earlier steps, risks / things worth verifying (bugs, edge cases, missing tests, security, perf). Refer to code with \`inline code\`. Do not paste long code — the GUI shows the hunks you reference.
-- \`hunk_ids\`: the diff hunks this step is about (e.g. "F2H1"). The GUI renders them next to your explanation. Use \`line_ranges\` to focus on part of a big hunk (new-file line numbers, which are shown at the left of the annotated diff).
-- \`visuals\`: include a visual whenever it helps understanding more than prose: architecture/flow (mermaid flowchart), call order (sequenceDiagram), types (classDiagram / erDiagram), state machines (stateDiagram-v2), before/after comparisons, data transformations. Choose the visual based on the content of the change; don't add decoration.
-  - kind "mermaid": valid Mermaid source only (no \`\`\` fences). Keep node labels short; quote labels containing special characters, e.g. A["foo(bar)"].
-  - kind "html": a self-contained HTML fragment (inline <style>/<script>/<svg>, NO external resources or network) for animations or interactive explanations — e.g. animating a request flowing through components, a data structure changing step by step, a before/after toggle, a timeline. It renders in a sandboxed iframe ~420px tall, full width, light background. Use a clean style (system-ui font, #2563eb accent, subtle colors). Prefer a "play / step" control for multi-stage animations, and loop or allow replay.
-  - Usually 0–2 visuals per step. Make the first step's visual a big-picture map of the whole change.
+## Composing a step (\`blocks\`)
+You decide the layout. Blocks render top-to-bottom in a single readable column. Pick whatever presentation makes THIS piece easiest to grasp:
+- \`code\` (from a diff hunk) with a view:
+  - "new": the resulting code, added lines subtly marked — best for new code.
+  - "split": before | after side by side — best for rewrites/refactors.
+  - "diff": unified diff — best for small surgical edits.
+  - "old": removed code.
+  Use \`start\`/\`end\` to show only the relevant lines. Use \`notes\` (attach a short phrase to a line) and \`highlight\` — annotating the code itself is better than prose about it.
+- \`context\`: a few lines of UNCHANGED code (e.g. the caller, the type definition) when it helps; counts toward the line budget.
+- \`text\`: 1–3 short sentences or bullets. Lead with the gist.
+- \`callout\`: one-line risk / tip / info (bugs, edge cases, missing tests, security).
+- \`mermaid\`: diagram (flowchart, sequenceDiagram, classDiagram, stateDiagram-v2, erDiagram). Raw Mermaid, no fences; keep labels short; quote labels with special characters.
+- \`html\`: self-contained HTML/SVG/CSS/JS (no external resources) for animation or interaction — e.g. data flowing through functions, a value changing through a loop, a before/after toggle. Rendered in a sandboxed iframe, width ~760px, white background, system-ui font, accent #2563eb. Give multi-stage animations a play/step control.
+
+Budget per step (enforced): ≤ ${LIMITS.stepCodeLines} lines of code in total (hard cap ${LIMITS.stepCodeLinesHard}), prose ≈ ${p.soft} characters (hard cap ${p.hard}). If you have more to say, it belongs in another step. Prefer: one code block with notes + 1–2 sentences, or one visual + 1–2 sentences.
 
 ## Language
-Write all explanations in ${lang}. Keep code identifiers as-is.
+Write all prose in ${lang}. Keep identifiers as-is.
 
 ## Rules
-- You are read-only. Never try to modify files.
-- Be accurate. If unsure, say so and suggest what to check. Do not invent behavior that isn't in the code.
-- Free text outside tool calls is not shown prominently; put everything the human should read inside tool calls.`;
+- Read-only. Never modify files.
+- Be accurate; if unsure, say what to verify. Don't invent behavior.
+- Text outside tool calls is not shown to the human.`;
 }
 
 export function initialPrompt(diff: DiffResult) {
@@ -41,8 +63,8 @@ export function initialPrompt(diff: DiffResult) {
     `## Files (${diff.files.length})\n${fileSummary(diff.files)}`,
     inline
       ? `## Annotated diff\nLines are prefixed with new-file line numbers. Hunk ids are in [brackets].\n\n${annotated}`
-      : `## Annotated diff\nThe diff is large (${annotated.length} chars), so it is not inlined. Use the \`get_diff\` tool with file_ids or hunk_ids to read it (in chunks).`,
-    `Now study the change and call \`submit_plan\`. Then immediately call \`present_step\` for step 1 and end your turn.`,
+      : `## Annotated diff\nThe diff is large (${annotated.length} chars), so it is not inlined. Use \`get_diff\` with file_ids or hunk_ids to read it in chunks.`,
+    `Study the change, call \`submit_plan\`, then call \`present_step\` for step index 0, and end your turn.`,
   ];
   return parts.filter(Boolean).join("\n\n");
 }

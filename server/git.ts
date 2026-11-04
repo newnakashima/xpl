@@ -171,7 +171,28 @@ export async function getDiff(repoPath: string, source: DiffSource): Promise<Dif
       break;
     }
   }
-  return { title, description, files: parseDiff(raw), raw };
+  const all = parseDiff(raw);
+  const files = all.filter((f) => !isNoise(displayPath(f)));
+  const skipped = all.filter((f) => isNoise(displayPath(f)));
+  if (skipped.length) {
+    description = `${description ?? ""}\n\n(Auto-excluded generated/lock files: ${skipped.map(displayPath).join(", ")})`.trim();
+  }
+  files.forEach((f, i) => {
+    const id = `F${i + 1}`;
+    f.hunks.forEach((h, j) => (h.id = `${id}H${j + 1}`));
+    f.id = id;
+  });
+  return { title, description, files, raw };
+}
+
+const NOISE = [
+  /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|Cargo\.lock|poetry\.lock|Gemfile\.lock|composer\.lock|go\.sum|uv\.lock)$/,
+  /(^|\/)(dist|build|out|\.next|coverage)\//,
+  /\.min\.(js|css)$/,
+  /\.map$/,
+];
+function isNoise(p: string) {
+  return NOISE.some((r) => r.test(p));
 }
 
 export function parseDiff(raw: string): FileDiff[] {

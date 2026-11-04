@@ -1,6 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
 import mermaid from "mermaid";
-import type { Visual } from "../types";
 
 mermaid.initialize({
   startOnLoad: false,
@@ -17,7 +16,7 @@ mermaid.initialize({
   },
 });
 
-function Mermaid({ code }: { code: string }) {
+export function Mermaid({ code }: { code: string }) {
   const id = "m" + useId().replace(/[^a-zA-Z0-9]/g, "");
   const [svg, setSvg] = useState<string>("");
   const [error, setError] = useState<string>("");
@@ -48,7 +47,7 @@ function Mermaid({ code }: { code: string }) {
 const CSP =
   "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:";
 
-function HtmlVisual({ code }: { code: string }) {
+export function HtmlVisual({ code }: { code: string }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(420);
   const token = useId();
@@ -75,20 +74,5 @@ new ResizeObserver(s).observe(document.documentElement);window.addEventListener(
       style={{ height }}
       title="visual"
     />
-  );
-}
-
-export function Visuals({ visuals }: { visuals: Visual[] }) {
-  if (!visuals.length) return null;
-  return (
-    <div className="visuals">
-      {visuals.map((v, i) => (
-        <figure key={i} className="visual">
-          {v.title && <figcaption className="visual-title">{v.title}</figcaption>}
-          {v.kind === "mermaid" ? <Mermaid code={v.code} /> : <HtmlVisual code={v.code} />}
-          {v.caption && <figcaption className="visual-caption">{v.caption}</figcaption>}
-        </figure>
-      ))}
-    </div>
   );
 }
