@@ -47,7 +47,7 @@ export interface Answer {
   questionId: string;
   blocks: Block[];
 }
-export type Phase = "planning" | "stepping" | "final_qa" | "finished";
+export type Phase = "planning" | "stepping" | "final_qa" | "finished" | "failed";
 
 export type SessionEvent =
   | { type: "meta"; title: string; description?: string; repo: string; fileCount: number; additions: number; deletions: number }

@@ -1,18 +1,20 @@
 {
   "name": "xpl",
   "version": "0.1.0",
-  "description": "AI-guided step-by-step code diff explainer (Claude Agent SDK)",
+  "description": "AI-guided step-by-step code diff explainer (Claude and Codex)",
   "scripts": {
     "dev": "concurrently -k -n server,web \"tsx watch server/index.ts\" \"vite\"",
     "build": "vite build",
     "start": "tsx server/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test server/*.test.ts"
   },
   "type": "module",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.318",
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/ibm-plex-sans-jp": "^5.3.1",
+    "cross-spawn": "^7.0.6",
     "dompurify": "^3.4.17",
     "express": "^5.3.0",
     "highlight.js": "^11.12.0",
@@ -24,6 +26,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
     "@types/dompurify": "^3.0.5",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.6",

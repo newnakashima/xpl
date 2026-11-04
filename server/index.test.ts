@@ -1,0 +1,78 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
+import { chmod, copyFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+const root = fileURLToPath(new URL("../", import.meta.url));
+
+test("invalid provider configuration fails visibly before the server starts listening", async () => {
+  await assert.rejects(promisify(execFile)(process.execPath, ["--import", "tsx", "server/index.ts"], {
+    cwd: root, env: { ...process.env, PORT: "0", XPL_PROVIDER: "invalid-provider" }, timeout: 5000,
+  }), (error: any) => {
+    assert.match(error.stderr, /XPL_PROVIDER/);
+    assert.doesNotMatch(error.stdout, /xpl running/);
+    return true;
+  });
+});
+
+test("a failed session streams failure, rejects later actions with 410, and can be deleted", async () => {
+  const temporary = await mkdtemp(path.join(tmpdir(), "xpl-api-test-"));
+  const executable = path.join(temporary, "codex");
+  await copyFile(fileURLToPath(new URL("./fixtures/codex.mjs", import.meta.url)), executable);
+  await chmod(executable, 0o755);
+  const child = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
+    cwd: root,
+    env: { ...process.env, PORT: "0", XPL_REPO: root, XPL_PROVIDER: "codex", XPL_CODEX_PATH: executable, XPL_USE_API_KEY: "", XPL_TEST_MODE: "fatal" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.on("data", (data) => { stderr += data; });
+  const closed = once(child, "close");
+  try {
+    const url = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Server startup timed out: ${stderr}`)), 5000);
+      let output = "";
+      child.stdout.on("data", (data) => {
+        output += data;
+        const match = output.match(/http:\/\/localhost:(\d+)/);
+        if (match) { clearTimeout(timer); resolve(`http://127.0.0.1:${match[1]}`); }
+      });
+      child.on("exit", () => { clearTimeout(timer); reject(new Error(`Server exited: ${stderr}`)); });
+      child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    });
+    const request = (endpoint: string, body?: unknown) => fetch(url + endpoint, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000),
+    });
+    assert.equal((await (await fetch(url + "/api/config")).json()).defaultProvider, "codex");
+    const created = await request("/api/sessions", { repoPath: root, source: { kind: "commit", sha: "HEAD" } });
+    assert.equal(created.status, 200);
+    const { id } = await created.json();
+    const events = await fetch(`${url}/api/sessions/${id}/events`, { signal: AbortSignal.timeout(5000) });
+    assert.equal(events.status, 200);
+    const reader = events.body!.getReader();
+    const decoder = new TextDecoder();
+    let output = "";
+    while (!output.includes('"phase":"failed"')) {
+      const chunk = await reader.read();
+      assert.equal(chunk.done, false);
+      output += decoder.decode(chunk.value, { stream: true });
+    }
+    await reader.cancel();
+    assert.doesNotMatch(output, /"phase":"finished"/);
+    const question = await request(`/api/sessions/${id}/questions`, { text: "質問", mode: "now" });
+    assert.equal(question.status, 410);
+    assert.match((await question.json()).error, /中断/);
+    assert.equal((await request(`/api/sessions/${id}/next`)).status, 410);
+    assert.equal((await fetch(`${url}/api/sessions/${id}`, { method: "DELETE" })).status, 200);
+    assert.equal((await fetch(`${url}/api/sessions/${id}/events`)).status, 404);
+  } finally {
+    child.kill("SIGTERM");
+    await closed;
+    await rm(temporary, { recursive: true, force: true });
+  }
+});

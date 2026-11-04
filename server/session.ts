@@ -5,6 +5,22 @@ import { z } from "zod";
 import { annotatedDiff, type DiffResult } from "./git.js";
 import { initialPrompt, systemPrompt, LIMITS, proseLimits } from "./prompt.js";
 import { BlockSchema, BlockError, measure, resolveBlocks, type Block } from "./blocks.js";
+import { CodexAgent, CodexTurnError } from "./codex.js";
+
+export type Provider = "claude" | "codex";
+
+export function resolveProvider(value: unknown = process.env.XPL_PROVIDER): Provider {
+  if (typeof value === "string") value = value.trim().toLowerCase();
+  if (value == null || value === "" || value === "claude") return "claude";
+  if (value === "codex") return "codex";
+  throw new Error("AI provider (XPL_PROVIDER) must be claude or codex.");
+}
+
+export function resolveModel(provider: Provider, model?: string): string | undefined {
+  return model?.trim() || (provider === "codex"
+    ? process.env.XPL_CODEX_MODEL
+    : process.env.XPL_CLAUDE_MODEL || process.env.XPL_MODEL) || undefined;
+}
 
 export type LineRange = { hunk_id: string; start: number; end: number };
 
@@ -29,7 +45,7 @@ export interface Step {
   blocks: Block[];
 }
 
-export type Phase = "planning" | "stepping" | "final_qa" | "finished";
+export type Phase = "planning" | "stepping" | "final_qa" | "finished" | "failed";
 
 export type SessionEvent =
   | { type: "meta"; title: string; description?: string; repo: string; fileCount: number; additions: number; deletions: number }
@@ -48,6 +64,7 @@ interface Turn {
   text: string;
   prepIndex?: number;
   questionId?: string;
+  attempts?: number;
 }
 
 /** How many steps to prepare ahead of the one being read. */
@@ -84,6 +101,7 @@ export interface SessionOptions {
   diff: DiffResult;
   language: string;
   model?: string;
+  provider?: Provider;
 }
 
 export class Session extends EventEmitter {
@@ -108,6 +126,9 @@ export class Session extends EventEmitter {
   private queue: Turn[] = [];
   private input = new Channel<SDKUserMessage>();
   private q?: Query;
+  private codex?: CodexAgent;
+  private closed = false;
+  get isClosed() { return this.closed; }
   private hunkIds: Set<string>;
   private planRejected = false;
 
@@ -165,12 +186,22 @@ export class Session extends EventEmitter {
   }
 
   private pump() {
+    if (this.closed) return;
     if (!this.turn) {
       const next = this.queue.shift();
       if (next) {
         this.turn = next;
         this.presentedThisTurn = 0;
-        this.input.push({ type: "user", message: { role: "user", content: next.text }, parent_tool_use_id: null });
+        if (this.codex) {
+          void this.codex.run(next.text).then(() => {
+            if (!this.closed) this.onTurnEnd();
+          }).catch((error) => {
+            if (error instanceof CodexTurnError) this.onTurnEnd(error.message);
+            else this.fail(error);
+          });
+        } else {
+          this.input.push({ type: "user", message: { role: "user", content: next.text }, parent_tool_use_id: null });
+        }
       }
     }
     this.updateStatus();
@@ -210,18 +241,14 @@ export class Session extends EventEmitter {
 
   /* ---------- MCP tools ---------- */
 
-  private buildMcp() {
+  private buildTools() {
     const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
     const err = (text: string) => ({ content: [{ type: "text" as const, text }], isError: true });
     const { files } = this.opts.diff;
     const ctx = { files, repoRoot: this.opts.repoRoot };
     const prose = proseLimits(this.opts.language);
 
-    return createSdkMcpServer({
-      name: "xpl",
-      version: "0.2.0",
-      alwaysLoad: true,
-      tools: [
+    return [
         tool(
           "get_diff",
           "Return the annotated diff for the given files and/or hunks.",
@@ -352,8 +379,7 @@ export class Session extends EventEmitter {
             return ok("Answer displayed.");
           }
         ),
-      ],
-    });
+      ];
   }
 
   /* ---------- lifecycle ---------- */
@@ -375,6 +401,20 @@ export class Session extends EventEmitter {
       return;
     }
 
+    if (resolveProvider(this.opts.provider) === "codex") {
+      this.codex = new CodexAgent({
+        cwd: repoRoot,
+        model: resolveModel("codex", this.opts.model),
+        instructions: systemPrompt(this.opts.language, "read-only shell commands"),
+        tools: this.buildTools(),
+        onActivity: (text) => this.emitEvent({ type: "activity", text }),
+        onError: (error) => this.fail(error),
+      });
+      await this.codex.start();
+      this.enqueue({ kind: "plan", text: initialPrompt(diff) });
+      return;
+    }
+
     const env: Record<string, string | undefined> = { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "xpl/0.2.0" };
     // Use the user's Claude subscription (claude login) rather than an API key unless explicitly opted in.
     if (!process.env.XPL_USE_API_KEY) delete env.ANTHROPIC_API_KEY;
@@ -384,23 +424,28 @@ export class Session extends EventEmitter {
       prompt: this.input,
       options: {
         cwd: repoRoot,
-        model: this.opts.model || process.env.XPL_MODEL || undefined,
+        model: resolveModel("claude", this.opts.model),
         systemPrompt: systemPrompt(this.opts.language),
         tools: ["Read", "Grep", "Glob"],
         allowedTools: ["Read", "Grep", "Glob", ...xplTools],
         permissionMode: "dontAsk",
         settingSources: [],
-        mcpServers: { xpl: this.buildMcp() },
+        mcpServers: { xpl: createSdkMcpServer({ name: "xpl", version: "0.2.0", alwaysLoad: true, tools: this.buildTools() }) },
         env,
       },
     });
 
     this.enqueue({ kind: "plan", text: initialPrompt(diff) });
-    this.consume().catch((e) => {
-      this.emitEvent({ type: "error", message: String(e?.message ?? e) });
-      this.turn = null;
-      this.updateStatus();
-    });
+    this.consume().catch((e) => this.fail(e));
+  }
+
+  private fail(error: unknown) {
+    if (this.closed) return;
+    this.emitEvent({ type: "error", message: String(error instanceof Error ? error.message : error) });
+    this.close();
+    this.turn = null;
+    this.queue = [];
+    this.setPhase("failed");
   }
 
   private async consume() {
@@ -423,18 +468,31 @@ export class Session extends EventEmitter {
           if (text) this.emitEvent({ type: "activity", text });
         }
       } else if (msg.type === "result") {
-        if (msg.subtype !== "success" || (msg as any).is_error) {
-          const detail = (msg as any).result || (msg as any).errors?.join("\n") || msg.subtype;
-          this.emitEvent({ type: "error", message: `AI turn failed: ${detail}` });
-        }
-        this.onTurnEnd();
+        const error = msg.subtype !== "success" || (msg as any).is_error
+          ? (msg as any).result || (msg as any).errors?.join("\n") || msg.subtype : undefined;
+        this.onTurnEnd(error);
       }
     }
   }
 
-  private onTurnEnd() {
+  private onTurnEnd(error?: string) {
+    if (this.closed) return;
     const finished = this.turn;
     this.turn = null;
+    if (error) this.emitEvent({ type: "error", message: `AI turn failed: ${error}` });
+    const missingPlan = finished?.kind === "plan" && this.phase === "planning";
+    const missingAnswer = finished?.kind === "question"
+      ? this.questions.some((q) => q.id === finished.questionId && !q.answered)
+      : finished?.kind === "final" && this.questions.some((q) => q.mode === "later" && !q.answered);
+    if (finished && (missingPlan || missingAnswer)) {
+      const attempts = (finished.attempts ?? 0) + 1;
+      if (attempts >= 3) {
+        this.fail(new Error(missingPlan ? "解説プランを作成できませんでした。" : "質問への回答を生成できませんでした。"));
+      } else {
+        this.enqueue({ ...finished, attempts }, true);
+      }
+      return;
+    }
     if (finished?.kind === "prepare" && finished.prepIndex === this.nextToPrepare) {
       // The AI ended the turn without producing the step; schedulePrefetch retries (bounded).
       const n = (this.prepFailures.get(finished.prepIndex) ?? 0) + 1;
@@ -459,6 +517,7 @@ export class Session extends EventEmitter {
 
   /** Human pressed OK. */
   next() {
+    if (this.closed) return;
     if (this.phase !== "stepping" || this.wantNext) return;
     if (this.currentStep + 1 < this.plan.length) {
       this.wantNext = true;
@@ -481,6 +540,7 @@ export class Session extends EventEmitter {
   }
 
   ask(text: string, mode: "now" | "later") {
+    if (this.closed) return false;
     const qn: Question = {
       id: `Q${this.questions.length + 1}`,
       text,
@@ -490,7 +550,7 @@ export class Session extends EventEmitter {
     };
     this.questions.push(qn);
     this.emitEvent({ type: "question", question: qn });
-    if (mode === "later" && (this.phase === "planning" || this.phase === "stepping")) return;
+    if (mode === "later" && (this.phase === "planning" || this.phase === "stepping")) return true;
     if (this.phase === "finished") this.setPhase("final_qa");
     const where =
       this.currentStep >= 0 ? ` while reading step ${this.currentStep + 1} "${this.plan[this.currentStep]?.title}"` : "";
@@ -502,9 +562,12 @@ export class Session extends EventEmitter {
       },
       true
     );
+    return true;
   }
 
   close() {
+    this.closed = true;
+    this.codex?.close();
     this.input.close();
     this.q?.close();
   }

@@ -67,7 +67,7 @@ function reducer(s: State, e: SessionEvent | { type: "reset" }): State {
       };
     }
     case "phase":
-      return { ...s, phase: e.phase };
+      return { ...s, phase: e.phase, ...(e.phase === "failed" ? { waiting: false, aiWorking: false } : {}) };
     case "error":
       return { ...s, errors: [...s.errors, e.message] };
   }
@@ -86,6 +86,12 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
     dispatch({ type: "reset" });
     const es = new EventSource(`/api/sessions/${id}/events`);
     es.onmessage = (m) => dispatch(JSON.parse(m.data));
+    es.onerror = () => {
+      if (es.readyState === EventSource.CLOSED) {
+        dispatch({ type: "error", message: "セッションに接続できません。差分を選び直してください。" });
+        dispatch({ type: "phase", phase: "failed" });
+      }
+    };
     return () => es.close();
   }, [id]);
 
@@ -119,13 +125,18 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
 
   async function ask() {
     const t = text.trim();
-    if (!t) return;
-    setText("");
-    await fetch(`/api/sessions/${id}/questions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: t, mode }),
-    });
+    if (!t || s.phase === "failed") return;
+    try {
+      const response = await fetch(`/api/sessions/${id}/questions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: t, mode }),
+      });
+      if (!response.ok) throw new Error((await response.json()).error);
+      setText("");
+    } catch (error) {
+      dispatch({ type: "error", message: String(error instanceof Error ? error.message : error) });
+    }
   }
 
   useEffect(() => {
@@ -150,7 +161,8 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
   const stepQuestions = (idx: number) => s.questions.filter((q) => q.afterStep === idx && q.mode === "now");
 
   let okLabel = "OK、次へ";
-  if (reviewing) okLabel = "次のステップへ";
+  if (s.phase === "failed") okLabel = "解説は中断されました";
+  else if (reviewing) okLabel = "次のステップへ";
   else if (s.phase === "planning" || lastStep < 0) okLabel = "解説を準備しています";
   else if (s.phase === "final_qa") okLabel = "質問に回答しています";
   else if (s.phase === "finished") okLabel = "解説は終わりました";
@@ -280,6 +292,12 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
                 {e}
               </div>
             ))}
+            {s.phase === "failed" && (
+              <div className="finished">
+                <p>解説を中断しました。差分を選び直して再開してください。</p>
+                <button className="btn" onClick={onExit}>差分を選び直す</button>
+              </div>
+            )}
             {view === "qa" ? (
               <div className="qa-summary">
                 <div className="step-kicker">
@@ -288,7 +306,7 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
                 </div>
                 <h2>質問への回答</h2>
                 {laterQs.map((q) => (
-                  <QA key={q.id} q={q} a={s.answers[q.id]} />
+                  <QA key={q.id} q={q} a={s.answers[q.id]} failed={s.phase === "failed"} />
                 ))}
                 {s.phase === "finished" && finished}
               </div>
@@ -303,18 +321,18 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
                 <h2>{step.title}</h2>
                 <Blocks blocks={step.blocks} />
                 {stepQuestions(step.index).map((q) => (
-                  <QA key={q.id} q={q} a={s.answers[q.id]} />
+                  <QA key={q.id} q={q} a={s.answers[q.id]} failed={s.phase === "failed"} />
                 ))}
                 {s.phase === "finished" && step.index === total - 1 && !laterQs.length && finished}
               </article>
-            ) : (
+            ) : s.phase !== "failed" ? (
               <div className="placeholder" aria-live="polite">
                 <div className="loader" />
                 <div className="label">{s.label ?? "解説を準備しています"}</div>
                 {s.activity && <div className="small">{s.activity}</div>}
                 {s.description && <div className="desc">{s.description}</div>}
               </div>
-            )}
+            ) : null}
           </div>
         </main>
       </div>
@@ -331,7 +349,7 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
           ) : (
             <>
               <span className="now">
-                <span className="dot" /> {s.phase === "finished" ? "完了" : "あなたの番です"}
+                <span className="dot" /> {s.phase === "failed" ? "中断" : s.phase === "finished" ? "完了" : "あなたの番です"}
               </span>
               {s.aiWorking && s.phase === "stepping" && <span>次のステップを先に用意しています</span>}
               {!s.aiWorking && s.prepared > 0 && <span>{s.prepared} ステップ用意済み</span>}
@@ -351,6 +369,7 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
         </div>
         <div className="ask">
           <textarea
+            disabled={s.phase === "failed"}
             ref={inputRef}
             value={text}
             aria-label="質問"
@@ -372,7 +391,7 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
                 最後にまとめて
               </button>
             </div>
-            <button className="btn" disabled={!text.trim()} onClick={ask}>
+            <button className="btn" disabled={!text.trim() || s.phase === "failed"} onClick={ask}>
               {mode === "now" ? "質問する" : "書き留める"}
             </button>
           </div>
@@ -386,7 +405,7 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
   );
 }
 
-function QA({ q, a }: { q: Question; a?: Answer }) {
+function QA({ q, a, failed }: { q: Question; a?: Answer; failed?: boolean }) {
   return (
     <div className="qa">
       <div className="q">
@@ -398,7 +417,7 @@ function QA({ q, a }: { q: Question; a?: Answer }) {
           <Blocks blocks={a.blocks} />
         </div>
       ) : (
-        <div className="a pending">{q.mode === "later" ? "すべてのステップのあとに回答します" : "回答を書いています…"}</div>
+        <div className="a pending">{failed ? "中断したため回答できませんでした" : q.mode === "later" ? "すべてのステップのあとに回答します" : "回答を書いています…"}</div>
       )}
     </div>
   );

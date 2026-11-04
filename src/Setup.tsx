@@ -14,16 +14,22 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
   const [pr, setPr] = useState("");
   const [language, setLanguage] = useState("日本語");
   const [model, setModel] = useState("");
+  const [provider, setProvider] = useState<"claude" | "codex">("claude");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     fetch("/api/config")
-      .then((r) => r.json())
+      .then(async (r) => {
+        if (!r.ok) throw new Error("設定を読み込めませんでした。サーバーの設定を確認してください。");
+        return r.json();
+      })
       .then((c) => {
         setRepoPath(c.defaultRepo);
-        load(c.defaultRepo);
-      });
+        setProvider(c.defaultProvider ?? "claude");
+        return load(c.defaultRepo);
+      })
+      .catch((e) => setError(e.message));
   }, []);
 
   async function load(p: string) {
@@ -50,7 +56,7 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
       const r = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repoPath: info?.root ?? repoPath, source, language, model }),
+        body: JSON.stringify({ repoPath: info?.root ?? repoPath, source, language, model, provider }),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error);
@@ -182,6 +188,13 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
           <div className="label">解説のしかた</div>
           <div className="prefs">
             <label>
+              AI
+              <select value={provider} onChange={(e) => { setProvider(e.target.value as "claude" | "codex"); setModel(""); }}>
+                <option value="claude">Claude</option>
+                <option value="codex">Codex</option>
+              </select>
+            </label>
+            <label>
               言語
               <select value={language} onChange={(e) => setLanguage(e.target.value)}>
                 <option>日本語</option>
@@ -190,12 +203,14 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
             </label>
             <label>
               モデル
-              <select value={model} onChange={(e) => setModel(e.target.value)}>
+              {provider === "codex" ? (
+                <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Codex の既定モデル" aria-label="Codex モデル" spellCheck={false} />
+              ) : <select value={model} onChange={(e) => setModel(e.target.value)}>
                 <option value="">既定</option>
                 <option value="opus">Opus</option>
                 <option value="sonnet">Sonnet</option>
                 <option value="haiku">Haiku</option>
-              </select>
+              </select>}
             </label>
           </div>
         </div>
@@ -207,7 +222,10 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
           </button>
         </div>
         <p className="setup-note">
-          Claude Code にログインしているサブスクリプションで動きます。未ログインなら <code>claude</code> を起動して <code>/login</code> してください。AI はファイルを読むだけで、変更はしません。
+          {provider === "codex"
+            ? <>Codex CLI のログイン情報で動きます。未ログインなら <code>codex login</code> を実行してください。</>
+            : <>Claude Code にログインしているサブスクリプションで動きます。未ログインなら <code>claude</code> を起動して <code>/login</code> してください。</>}
+          {" "}AI はファイルを読むだけで、変更はしません。
         </p>
       </div>
     </div>
