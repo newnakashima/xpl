@@ -3,14 +3,17 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getDiff, getRepoInfo, resolveRepoRoot, type DiffSource } from "./git.js";
-import { Session } from "./session.js";
+import { Session, resolveProvider } from "./session.js";
+import { SessionRegistry } from "./sessions.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
 const defaultRepo = path.resolve(process.env.XPL_REPO || process.argv[2] || process.cwd());
-const sessions = new Map<string, Session>();
+// Validate configuration before listening so startup failures are visible.
+const defaultProvider = resolveProvider();
+const sessions = new SessionRegistry();
 
 // Only accept requests from localhost origins (basic CSRF protection for a local tool).
 app.use("/api", (req, res, next) => {
@@ -23,7 +26,7 @@ app.use("/api", (req, res, next) => {
 });
 
 app.get("/api/config", (_req, res) => {
-  res.json({ defaultRepo });
+  res.json({ defaultRepo, defaultProvider });
 });
 
 app.get("/api/repo", async (req, res) => {
@@ -36,17 +39,24 @@ app.get("/api/repo", async (req, res) => {
 
 app.post("/api/sessions", async (req, res) => {
   try {
-    const { repoPath, source, language, model } = req.body as {
+    const { repoPath, source, language, model, provider } = req.body as {
       repoPath: string;
       source: DiffSource;
       language?: string;
       model?: string;
+      provider?: string;
     };
+    const selectedProvider = resolveProvider(provider ?? defaultProvider);
     const root = await resolveRepoRoot(repoPath || defaultRepo);
     const diff = await getDiff(root, source);
-    const s = new Session({ repoRoot: root, diff, language: language || "日本語", model });
-    sessions.set(s.id, s);
-    await s.start();
+    const s = new Session({ repoRoot: root, diff, language: language || "日本語", model, provider: selectedProvider });
+    try {
+      await s.start();
+    } catch (error) {
+      s.close();
+      throw error;
+    }
+    sessions.add(s);
     res.json({ id: s.id, files: diff.files.length });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
@@ -68,18 +78,21 @@ app.get("/api/sessions/:id/events", (req, res) => {
     Connection: "keep-alive",
   });
   const send = (e: unknown) => res.write(`data: ${JSON.stringify(e)}\n\n`);
+  const release = sessions.subscribe(s.id);
   for (const e of s.events) send(e);
   s.on("event", send);
   const ping = setInterval(() => res.write(": ping\n\n"), 15000);
   req.on("close", () => {
     clearInterval(ping);
     s.off("event", send);
+    release();
   });
 });
 
 app.post("/api/sessions/:id/next", (req, res) => {
   const s = getSession(req.params.id, res);
   if (!s) return;
+  if (s.isClosed) { res.status(410).json({ error: "セッションは中断されています。差分を選び直してください。" }); return; }
   s.next();
   res.json({ ok: true });
 });
@@ -92,14 +105,16 @@ app.post("/api/sessions/:id/questions", (req, res) => {
     res.status(400).json({ error: "empty question" });
     return;
   }
-  s.ask(text.trim(), mode === "later" ? "later" : "now");
+  if (!s.ask(text.trim(), mode === "later" ? "later" : "now")) {
+    res.status(410).json({ error: "セッションは中断されています。差分を選び直してください。" });
+    return;
+  }
   res.json({ ok: true });
 });
 
 app.delete("/api/sessions/:id", (req, res) => {
   const s = getSession(req.params.id, res);
   if (!s) return;
-  s.close();
   sessions.delete(s.id);
   res.json({ ok: true });
 });
@@ -111,11 +126,15 @@ if (fs.existsSync(dist)) {
 }
 
 const port = Number(process.env.PORT || 4777);
-app.listen(port, "127.0.0.1", () => {
-  console.log(`xpl running at http://localhost:${port}  (repo: ${defaultRepo})`);
+const server = app.listen(port, "127.0.0.1", () => {
+  const address = server.address();
+  const boundPort = address && typeof address !== "string" ? address.port : port;
+  console.log(`xpl running at http://localhost:${boundPort}  (repo: ${defaultRepo})`);
 });
 
-process.on("SIGINT", () => {
-  for (const s of sessions.values()) s.close();
+const shutdown = () => {
+  sessions.close();
   process.exit(0);
-});
+};
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

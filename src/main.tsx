@@ -15,7 +15,11 @@ function App() {
     const url = id ? `?s=${id}` : location.pathname;
     history.replaceState(null, "", url);
   }, [id]);
-  return id ? <SessionView id={id} onExit={() => setId(null)} /> : <Setup onStart={setId} />;
+  function exit() {
+    if (id) void fetch(`/api/sessions/${id}`, { method: "DELETE", keepalive: true }).catch(console.error);
+    setId(null);
+  }
+  return id ? <SessionView id={id} onExit={exit} /> : <Setup onStart={setId} />;
 }
 
 createRoot(document.getElementById("root")!).render(

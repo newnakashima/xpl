@@ -3,17 +3,19 @@
 AI がコード差分を **少しずつ・図やアニメーション付きで** 解説してくれるローカル Web アプリ。
 AI が大量に生成したコードを、人間が素早く・高い解像度で理解するためのツールです。
 
-- Claude Agent SDK 経由で、**あなたの Claude サブスクリプション**（`claude` CLI のログイン）を使います
+- **Claude / Codex を選択可能**。Claude Agent SDK または Codex app-server 経由で、各 CLI のログイン情報を使います
 - 差分の種類: 作業ツリー（`git diff HEAD` + untracked）/ ブランチ比較（`base...head`）/ 特定コミット / GitHub PR（`gh pr diff`）
 - AI はまず解説プラン（理解しやすい順に hunk をまとめたステップ）を作り、1 ステップずつ表示。**OK** で次へ
 - 各ステップ: 解説 (Markdown) + 差分に応じて生成される図（Mermaid）やアニメーション（サンドボックス化した HTML/SVG）+ 該当 hunk
 - 質問は「すぐに聞く」か「あとでまとめて」。まとめた質問は全ステップ終了後に AI が改めて回答
-- AI は読み取り専用ツール（Read / Grep / Glob）のみ使用。ファイルは変更しません
+- AI は読み取り専用で動作。Claude は Read / Grep / Glob、Codex は read-only サンドボックスでコードを調べます
 
 ## 必要なもの
 
 - Node.js 18+
-- Claude Code にログイン済み（`claude` を起動して `/login`）
+- 使用する AI の CLI にログイン済み:
+  - Claude: `claude` を起動して `/login`
+  - Codex: `npm install -g @openai/codex` のあと `codex login`（app-server の dynamic tools 対応版が必要。0.166.0 で動作確認）
 - PR を使う場合は `gh` CLI（`gh auth login` 済み）
 
 ## 使い方
@@ -28,6 +30,10 @@ npm start -- /path/to/your/repo   # http://localhost:4777
 
 開発時は `npm run dev`（Vite :5173 + API :4777）。
 
+開始画面の「AI」で Codex を選ぶと、Codex でプラン作成・ステップ解説・質問回答を行います。
+モデル欄を空にすると Codex の既定モデルを使います。利用可能なモデル ID を直接指定することもできます。
+既定の AI を Codex にするには `XPL_PROVIDER=codex npm start -- /path/to/your/repo`。
+
 ### キーボード
 
 - `Enter` / `→`: OK（次へ）　`←`: 前のステップ　`/`: 質問欄へ　`⌘/Ctrl+Enter`: 質問送信
@@ -38,12 +44,17 @@ npm start -- /path/to/your/repo   # http://localhost:4777
 |---|---|
 | `PORT` | サーバーのポート（既定 4777） |
 | `XPL_REPO` | 既定のリポジトリパス |
-| `XPL_MODEL` | 既定モデル（`opus` / `sonnet` / `haiku` など） |
-| `XPL_USE_API_KEY=1` | `ANTHROPIC_API_KEY` を使う（既定ではサブスクリプション利用のため除外） |
+| `XPL_PROVIDER` | 既定の AI（`claude` / `codex`、未指定時は `claude`） |
+| `XPL_MODEL` | Claude 用の既定モデル（従来互換。`opus` / `sonnet` / `haiku` など） |
+| `XPL_CLAUDE_MODEL` | Claude 用の既定モデル（`XPL_MODEL` より優先） |
+| `XPL_CODEX_MODEL` | Codex 用の既定モデル（未指定なら Codex の設定を使用） |
+| `XPL_CODEX_PATH` | Codex CLI の実行ファイル（既定 `codex`） |
+| `XPL_USE_API_KEY=1` | CLI に API キー環境変数を渡す（既定では `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `CODEX_API_KEY` を該当プロセスから除外） |
 
 ## 構成
 
 - `server/git.ts` — 差分取得とパース（hunk に `F2H1` のような ID を付与）
-- `server/session.ts` — Agent SDK セッション。カスタム MCP ツール `submit_plan` / `present_step` / `answer_question` / `get_diff` で AI が GUI に出力
+- `server/session.ts` — 両 AI 共通のセッション進行と解説ツール。Claude には MCP、Codex には dynamic tools として公開
+- `server/codex.ts` — Codex app-server の stdio 接続、ターン処理とツール呼び出し。read-only / 承認なしで動作し、継承した MCP・プラグイン・Apps はこのスレッドで無効化
 - `server/prompt.ts` — システムプロンプト
 - `src/` — React UI（Mermaid 描画、sandboxed iframe での HTML アニメーション、差分ビュー）
