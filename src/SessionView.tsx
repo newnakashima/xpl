@@ -149,13 +149,13 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
 
   const stepQuestions = (idx: number) => s.questions.filter((q) => q.afterStep === idx && q.mode === "now");
 
-  let okLabel = "OK、次へ →";
-  if (reviewing) okLabel = "次のステップへ →";
-  else if (s.phase === "planning" || lastStep < 0) okLabel = "準備中…";
-  else if (s.phase === "final_qa") okLabel = "質問に回答中…";
-  else if (s.phase === "finished") okLabel = "完了";
-  else if (requested) okLabel = "準備中…";
-  else if (isLast) okLabel = laterPending.length ? `OK、まとめて質問 (${laterPending.length}) →` : "OK、完了 ✓";
+  let okLabel = "OK、次へ";
+  if (reviewing) okLabel = "次のステップへ";
+  else if (s.phase === "planning" || lastStep < 0) okLabel = "解説を準備しています";
+  else if (s.phase === "final_qa") okLabel = "質問に回答しています";
+  else if (s.phase === "finished") okLabel = "解説は終わりました";
+  else if (requested) okLabel = "次のステップを準備しています";
+  else if (isLast) okLabel = laterPending.length ? `OK、まとめた質問 ${laterPending.length} 件へ` : "OK、解説を終える";
   const okDisabled = !reviewing && (s.phase !== "stepping" || lastStep < 0 || requested || view === "qa");
 
   // group plan by section
@@ -166,73 +166,109 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
     else sections.push({ name: p.section, items: [{ p, i }] });
   });
 
+  const laterQs = s.questions.filter((q) => q.mode === "later");
+  const canOpenQa = s.phase === "final_qa" || s.phase === "finished";
+  const finished = (
+    <div className="finished">
+      <p>すべてのステップを読み終えました。</p>
+      <button className="btn" onClick={onExit}>
+        別の差分を読む
+      </button>
+    </div>
+  );
+
   return (
     <div className="session">
       <header className="topbar">
-        <button className="btn ghost" onClick={onExit}>
-          ← 戻る
+        <button className="btn ghost" onClick={onExit} title="差分の選択画面に戻る">
+          差分を選び直す
         </button>
         <div className="topbar-title">
-          <span className="logo">xpl</span> {s.title}
+          <span className="logo">xpl</span>
+          <span className="t" title={s.title}>
+            {s.title}
+          </span>
         </div>
-        <div className="topbar-stat muted">
-          {s.fileCount} files · <span className="plus">+{s.additions}</span> <span className="minus">-{s.deletions}</span>
-        </div>
+        {s.fileCount > 0 && (
+          <div className="topbar-stat">
+            <span>{s.fileCount} ファイル</span>
+            <span className="plus">+{s.additions}</span>
+            <span className="minus">−{s.deletions}</span>
+          </div>
+        )}
       </header>
-
-      {total > 0 && (
-        <div className="progress">
-          <div className="progress-bar" style={{ width: `${((lastStep + 1) / total) * 100}%` }} />
-        </div>
-      )}
 
       <div className="layout">
         <aside className="sidebar">
           {s.overview && (
             <section>
-              <h3>概要</h3>
-              <Markdown className="small" text={s.overview} />
+              <h3>この変更について</h3>
+              <Markdown className="small overview" text={s.overview} />
             </section>
           )}
           <section>
-            <h3>ステップ {total ? `${lastStep + 1} / ${total}` : ""}</h3>
-            {!total && <div className="muted small">プラン作成中…</div>}
-            {sections.map((sec, si) => (
-              <div key={si} className="section">
-                <div className="section-name">{sec.name}</div>
-                <ol className="steps">
-                  {sec.items.map(({ p, i }) => {
-                    const shown = i <= lastStep;
-                    return (
-                      <li
-                        key={i}
-                        className={`${shown ? "done" : ""} ${view === i ? "current" : ""}`}
-                        onClick={() => shown && setView(i)}
-                      >
-                        <span className="num">{i + 1}</span>
-                        <span className="t">{p.title}</span>
-                        {stepQuestions(i).length > 0 && <span className="qbadge">Q{stepQuestions(i).length}</span>}
-                      </li>
-                    );
-                  })}
-                </ol>
-              </div>
-            ))}
+            <h3>
+              <span>解説の順番</span>
+              {total > 0 && (
+                <span className="count">
+                  {lastStep + 1} / {total}
+                </span>
+              )}
+            </h3>
+            {!total && <div className="muted small">変更を読んで、解説の順番を考えています…</div>}
+            <div className="route">
+              {sections.map((sec, si) => (
+                <div key={si} className="section">
+                  {sec.name && (
+                    <div className={"section-name " + (sec.items[0].i <= lastStep ? "reached" : "")}>{sec.name}</div>
+                  )}
+                  <ol className="steps">
+                    {sec.items.map(({ p, i }) => {
+                      const shown = i <= lastStep;
+                      const nq = stepQuestions(i).length;
+                      return (
+                        <li
+                          key={i}
+                          className={[shown ? "reached" : "", i + 1 <= lastStep ? "next-reached" : "", view === i ? "current" : ""].join(" ")}
+                        >
+                          <button className="step-link" disabled={!shown} onClick={() => setView(i)} aria-current={view === i ? "step" : undefined}>
+                            <span className="num">{i + 1}</span>
+                            <span className="t">{p.title}</span>
+                            {nq > 0 && (
+                              <span className="qbadge" title={`このステップでの質問 ${nq} 件`}>
+                                Q{nq}
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
+              ))}
+            </div>
           </section>
-          {s.questions.some((q) => q.mode === "later") && (
+          {laterQs.length > 0 && (
             <section>
-              <h3 className="clickable" onClick={() => (s.phase === "final_qa" || s.phase === "finished") && setView("qa")}>
-                あとで聞く質問 ({s.questions.filter((q) => q.mode === "later").length})
+              <h3>
+                <span>最後にまとめて聞く質問</span>
+                <span className="count">{laterQs.length}</span>
               </h3>
               <ul className="later-list">
-                {s.questions
-                  .filter((q) => q.mode === "later")
-                  .map((q) => (
-                    <li key={q.id} className={q.answered ? "answered" : ""}>
-                      <span className="muted">S{q.afterStep + 1}</span> {q.text}
-                    </li>
-                  ))}
+                {laterQs.map((q) => (
+                  <li key={q.id} className={q.answered ? "answered" : ""}>
+                    <span className="from">ステップ{q.afterStep + 1}</span>
+                    <span className="txt">{q.text}</span>
+                  </li>
+                ))}
               </ul>
+              {canOpenQa && (
+                <p>
+                  <button className="link-btn" onClick={() => setView("qa")}>
+                    回答を読む
+                  </button>
+                </p>
+              )}
             </section>
           )}
         </aside>
@@ -240,37 +276,43 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
         <main className="main" ref={mainRef}>
           <div className="column">
             {s.errors.map((e, i) => (
-              <div key={i} className="error">
+              <div key={i} className="error" role="alert">
                 {e}
               </div>
             ))}
             {view === "qa" ? (
               <div className="qa-summary">
-                <h2>まとめて質問への回答</h2>
-                {s.questions
-                  .filter((q) => q.mode === "later")
-                  .map((q) => (
-                    <QA key={q.id} q={q} a={s.answers[q.id]} />
-                  ))}
-                {s.phase === "finished" && <div className="finished">すべての解説が完了しました</div>}
+                <div className="step-kicker">
+                  <span className="sec">まとめて聞いた質問</span>
+                  <span className="pos">{laterQs.length} 件</span>
+                </div>
+                <h2>質問への回答</h2>
+                {laterQs.map((q) => (
+                  <QA key={q.id} q={q} a={s.answers[q.id]} />
+                ))}
+                {s.phase === "finished" && finished}
               </div>
             ) : step ? (
               <article className="step" key={step.index}>
-                <div className="step-num">
-                  {s.plan[step.index]?.section} · {step.index + 1} / {total}
+                <div className="step-kicker">
+                  {s.plan[step.index]?.section && <span className="sec">{s.plan[step.index].section}</span>}
+                  <span className="pos">
+                    ステップ {step.index + 1} / {total}
+                  </span>
                 </div>
                 <h2>{step.title}</h2>
                 <Blocks blocks={step.blocks} />
                 {stepQuestions(step.index).map((q) => (
                   <QA key={q.id} q={q} a={s.answers[q.id]} />
                 ))}
-                {s.phase === "finished" && step.index === total - 1 && <div className="finished">すべての解説が完了しました</div>}
+                {s.phase === "finished" && step.index === total - 1 && !laterQs.length && finished}
               </article>
             ) : (
-              <div className="placeholder">
-                <div className="spinner" />
-                <div>{s.label ?? "準備中…"}</div>
-                {s.activity && <div className="muted small">{s.activity}</div>}
+              <div className="placeholder" aria-live="polite">
+                <div className="loader" />
+                <div className="label">{s.label ?? "解説を準備しています"}</div>
+                {s.activity && <div className="small">{s.activity}</div>}
+                {s.description && <div className="desc">{s.description}</div>}
               </div>
             )}
           </div>
@@ -278,26 +320,41 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
       </div>
 
       <footer className="actionbar">
-        <div className="status">
+        <div className="status" aria-live="polite">
           {s.waiting ? (
             <>
-              <span className="dot busy" /> {s.label}
-              {s.activity && <span className="muted"> · {s.activity}</span>}
+              <span className="now">
+                <span className="dot busy" /> {s.label ?? "処理しています"}
+              </span>
+              {s.activity && <span>{s.activity}</span>}
             </>
           ) : (
             <>
-              <span className="dot" /> {s.phase === "finished" ? "完了" : "待機中"}
-              {s.aiWorking && s.phase === "stepping" && <span className="muted"> · 次のステップを先読み中</span>}
-              {!s.aiWorking && s.prepared > 0 && <span className="muted"> · {s.prepared} ステップ準備済み</span>}
-              <span className="muted"> · Enter/→ 次へ　← 戻る　/ 質問</span>
+              <span className="now">
+                <span className="dot" /> {s.phase === "finished" ? "完了" : "あなたの番です"}
+              </span>
+              {s.aiWorking && s.phase === "stepping" && <span>次のステップを先に用意しています</span>}
+              {!s.aiWorking && s.prepared > 0 && <span>{s.prepared} ステップ用意済み</span>}
             </>
           )}
+          <span className="keys">
+            <span>
+              <kbd>Enter</kbd> 次へ
+            </span>
+            <span>
+              <kbd>←</kbd> 前へ
+            </span>
+            <span>
+              <kbd>/</kbd> 質問
+            </span>
+          </span>
         </div>
         <div className="ask">
           <textarea
             ref={inputRef}
             value={text}
-            placeholder="質問があればここに（⌘/Ctrl+Enter で送信）"
+            aria-label="質問"
+            placeholder={mode === "now" ? "わからないところを質問する（⌘Enter で送信）" : "最後にまとめて聞きたいことを書いておく（⌘Enter で送信）"}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -307,21 +364,22 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
             }}
           />
           <div className="ask-controls">
-            <div className="seg">
-              <button className={mode === "now" ? "on" : ""} onClick={() => setMode("now")}>
-                すぐに聞く
+            <div className="seg" role="group" aria-label="質問するタイミング">
+              <button className={mode === "now" ? "on" : ""} aria-pressed={mode === "now"} onClick={() => setMode("now")}>
+                今すぐ聞く
               </button>
-              <button className={mode === "later" ? "on" : ""} onClick={() => setMode("later")}>
-                あとでまとめて
+              <button className={mode === "later" ? "on" : ""} aria-pressed={mode === "later"} onClick={() => setMode("later")}>
+                最後にまとめて
               </button>
             </div>
             <button className="btn" disabled={!text.trim()} onClick={ask}>
-              送信
+              {mode === "now" ? "質問する" : "書き留める"}
             </button>
           </div>
         </div>
         <button className="btn primary ok" disabled={okDisabled} onClick={next}>
-          {okLabel}
+          <span>{okLabel}</span>
+          <kbd>Enter</kbd>
         </button>
       </footer>
     </div>
@@ -332,14 +390,15 @@ function QA({ q, a }: { q: Question; a?: Answer }) {
   return (
     <div className="qa">
       <div className="q">
-        <span className="qid">{q.id}</span> {q.text}
+        <span className="qid">{q.id}</span>
+        <span>{q.text}</span>
       </div>
       {a ? (
         <div className="a">
           <Blocks blocks={a.blocks} />
         </div>
       ) : (
-        <div className="a muted">{q.mode === "later" ? "最後にまとめて回答します" : "回答を待っています…"}</div>
+        <div className="a pending">{q.mode === "later" ? "すべてのステップのあとに回答します" : "回答を書いています…"}</div>
       )}
     </div>
   );

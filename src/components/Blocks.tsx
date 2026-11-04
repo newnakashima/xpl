@@ -1,6 +1,7 @@
 import { Fragment, useMemo } from "react";
 import hljs from "highlight.js/lib/common";
 import "highlight.js/styles/github.css";
+import "./code-theme.css";
 import type { Block, CodeBlock as CodeBlockT, Row } from "../types";
 import { Markdown } from "./Markdown";
 import { HtmlVisual, Mermaid } from "./Visuals";
@@ -26,7 +27,7 @@ function useHighlighted(rows: Row[], lang: string) {
 const VIEW_LABEL: Record<CodeBlockT["view"], string> = {
   new: "変更後",
   diff: "差分",
-  split: "変更前 → 変更後",
+  split: "変更前と変更後",
   old: "削除されたコード",
   context: "周辺コード（変更なし）",
 };
@@ -96,14 +97,14 @@ export function CodeBlock({ block }: { block: CodeBlockT }) {
       {block.view === "split" ? (
         <div className="split">
           <div className="split-pane">
-            <div className="split-label">Before</div>
+            <div className="split-label">変更前</div>
             {(() => {
               const xs = indexed.filter((x) => x.r.kind !== "add");
               return <Lines rows={xs.map((x) => x.r)} html={xs.map((x) => x.h)} view="split" block={block} side="old" />;
             })()}
           </div>
           <div className="split-pane">
-            <div className="split-label">After</div>
+            <div className="split-label">変更後</div>
             {(() => {
               const xs = indexed.filter((x) => x.r.kind !== "del");
               return <Lines rows={xs.map((x) => x.r)} html={xs.map((x) => x.h)} view="split" block={block} side="new" />;
@@ -118,7 +119,7 @@ export function CodeBlock({ block }: { block: CodeBlockT }) {
   );
 }
 
-const TONE_ICON = { info: "ℹ️", tip: "💡", risk: "⚠️" } as const;
+const TONE_LABEL = { info: "補足", tip: "ヒント", risk: "注意" } as const;
 
 export function Blocks({ blocks }: { blocks: Block[] }) {
   return (
@@ -130,7 +131,7 @@ export function Blocks({ blocks }: { blocks: Block[] }) {
           case "callout":
             return (
               <div key={i} className={`callout tone-${b.tone}`}>
-                <span className="callout-icon">{TONE_ICON[b.tone]}</span>
+                <span className="callout-label">{TONE_LABEL[b.tone]}</span>
                 <Markdown text={b.markdown} />
               </div>
             );

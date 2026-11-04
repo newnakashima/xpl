@@ -5,14 +5,30 @@ mermaid.initialize({
   startOnLoad: false,
   theme: "base",
   securityLevel: "strict",
-  fontFamily: "ui-sans-serif, system-ui, sans-serif",
+  fontFamily: '"IBM Plex Sans JP", "Hiragino Sans", sans-serif',
   themeVariables: {
-    primaryColor: "#eef2ff",
-    primaryBorderColor: "#6366f1",
-    primaryTextColor: "#1e1b4b",
-    lineColor: "#64748b",
-    secondaryColor: "#f0fdf4",
-    tertiaryColor: "#fff7ed",
+    fontSize: "14px",
+    background: "#ffffff",
+    primaryColor: "#ffffff",
+    primaryBorderColor: "#1b5e86",
+    primaryTextColor: "#262a30",
+    secondaryColor: "#e7eff4",
+    secondaryBorderColor: "#1b5e86",
+    tertiaryColor: "#f4f5f2",
+    tertiaryBorderColor: "#a4a8ad",
+    lineColor: "#6e737a",
+    textColor: "#262a30",
+    noteBkgColor: "#fff7cc",
+    noteBorderColor: "#d9b21f",
+    noteTextColor: "#262a30",
+    actorBkg: "#ffffff",
+    actorBorder: "#1b5e86",
+    actorLineColor: "#a4a8ad",
+    signalColor: "#262a30",
+    signalTextColor: "#262a30",
+    clusterBkg: "#f4f5f2",
+    clusterBorder: "#dde0dc",
+    edgeLabelBackground: "#ffffff",
   },
 });
 
@@ -61,7 +77,7 @@ export function HtmlVisual({ code }: { code: string }) {
     return () => window.removeEventListener("message", onMsg);
   }, [token]);
   const doc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP}">
-<style>html,body{margin:0;padding:12px;font-family:ui-sans-serif,system-ui,sans-serif;color:#0f172a;background:#fff;box-sizing:border-box}</style>
+<style>html,body{margin:0;padding:12px;font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;color:#262a30;background:#fff;box-sizing:border-box}</style>
 </head><body>${code}
 <script>(function(){var t=${JSON.stringify(token)};function s(){parent.postMessage({xplToken:t,height:document.documentElement.scrollHeight},"*")}
 new ResizeObserver(s).observe(document.documentElement);window.addEventListener("load",s);s();})();</script></body></html>`;
