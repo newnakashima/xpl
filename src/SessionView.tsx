@@ -133,7 +133,8 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
         body: JSON.stringify({ text: t, mode }),
       });
       if (!response.ok) throw new Error((await response.json()).error);
-      setText("");
+      // Keep anything typed while the request was in flight.
+      setText((current) => (current.trim() === t ? "" : current));
     } catch (error) {
       dispatch({ type: "error", message: String(error instanceof Error ? error.message : error) });
     }
@@ -161,8 +162,8 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
   const stepQuestions = (idx: number) => s.questions.filter((q) => q.afterStep === idx && q.mode === "now");
 
   let okLabel = "OK、次へ";
-  if (s.phase === "failed") okLabel = "解説は中断されました";
-  else if (reviewing) okLabel = "次のステップへ";
+  if (reviewing) okLabel = "次のステップへ";
+  else if (s.phase === "failed") okLabel = "解説は中断されました";
   else if (s.phase === "planning" || lastStep < 0) okLabel = "解説を準備しています";
   else if (s.phase === "final_qa") okLabel = "質問に回答しています";
   else if (s.phase === "finished") okLabel = "解説は終わりました";
