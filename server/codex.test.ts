@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { tool } from "@anthropic-ai/claude-agent-sdk";
+import { tool } from "./tools.js";
 import { CodexAgent } from "./codex.js";
-import { Session, resolveModel, resolveProvider, type SessionEvent } from "./session.js";
+import { Session, resolveModel, type SessionEvent } from "./session.js";
 
 let temporary: string;
 const previous = { ...process.env };
-const scopedEnv = ["XPL_PROVIDER", "XPL_MODEL", "XPL_CLAUDE_MODEL", "XPL_CODEX_MODEL", "XPL_TEST_MODE"];
+const scopedEnv = ["XPL_CODEX_MODEL", "XPL_TEST_MODE"];
 before(async () => {
   temporary = await mkdtemp(path.join(tmpdir(), "xpl-codex-test-"));
   const executable = path.join(temporary, "codex");
@@ -114,28 +114,14 @@ test("missing Codex executable reports installation guidance", async () => {
   }
 });
 
-test("provider selection keeps Claude as the default and rejects unsupported providers", () => {
-  delete process.env.XPL_PROVIDER;
-  assert.equal(resolveProvider(), "claude");
-  process.env.XPL_PROVIDER = "codex";
-  assert.equal(resolveProvider(), "codex");
-  assert.equal(resolveProvider("claude"), "claude");
-  assert.equal(resolveProvider(""), "claude");
-  assert.equal(resolveProvider(" Codex "), "codex");
-  assert.throws(() => resolveProvider("other"), /provider/);
-});
-
-test("provider defaults never send a Claude model to Codex or a Codex model to Claude", () => {
-  delete process.env.XPL_CLAUDE_MODEL;
+test("model selection uses an explicit model, then XPL_CODEX_MODEL, then the Codex default", () => {
   delete process.env.XPL_CODEX_MODEL;
-  process.env.XPL_MODEL = "opus";
-  assert.equal(resolveModel("claude"), "opus");
-  assert.equal(resolveModel("codex"), undefined);
+  assert.equal(resolveModel(), undefined);
+  assert.equal(resolveModel(""), undefined);
   process.env.XPL_CODEX_MODEL = "codex-model";
-  process.env.XPL_CLAUDE_MODEL = "sonnet";
-  assert.equal(resolveModel("codex"), "codex-model");
-  assert.equal(resolveModel("claude"), "sonnet");
-  assert.equal(resolveModel("codex", "explicit"), "explicit");
+  assert.equal(resolveModel(), "codex-model");
+  assert.equal(resolveModel("  "), "codex-model");
+  assert.equal(resolveModel(" explicit "), "explicit");
 });
 
 function waitFor(session: Session, predicate: (event: SessionEvent) => boolean) {
@@ -156,7 +142,7 @@ function waitFor(session: Session, predicate: (event: SessionEvent) => boolean) 
 
 function makeSession() {
   return new Session({
-    provider: "codex", repoRoot: process.cwd(), language: "日本語",
+    repoRoot: process.cwd(), language: "日本語",
     diff: { title: "Example", raw: "", files: [{
       id: "F1", oldPath: "example.ts", newPath: "example.ts", status: "modified", additions: 1, deletions: 1,
       hunks: [{ id: "F1H1", header: "@@ -1 +1 @@", oldStart: 1, newStart: 1, lines: ["-const a = 1;", "+const a = 2;"] }],
