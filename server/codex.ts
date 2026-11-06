@@ -2,7 +2,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import spawn from "cross-spawn";
 import { createInterface } from "node:readline";
 import { z } from "zod";
-import type { SdkMcpToolDefinition } from "@anthropic-ai/claude-agent-sdk";
+import type { ToolDefinition } from "./tools.js";
 
 type Pending = { resolve: (value: any) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
 
@@ -23,7 +23,7 @@ export class CodexAgent {
     cwd: string;
     model?: string;
     instructions: string;
-    tools: SdkMcpToolDefinition<any>[];
+    tools: ToolDefinition[];
     onActivity: (text: string) => void;
     onError: (error: Error) => void;
   }) {}
@@ -85,7 +85,7 @@ export class CodexAgent {
           type: "function",
           name: tool.name,
           description: tool.description,
-          inputSchema: z.toJSONSchema(z.object(tool.inputSchema)),
+          inputSchema: z.toJSONSchema(tool.inputSchema),
         })),
       });
       this.threadId = result.thread.id;
@@ -150,8 +150,7 @@ export class CodexAgent {
         if (threadId !== this.threadId) throw new Error("Unexpected Codex thread.");
         const tool = this.options.tools.find((t) => t.name === name);
         if (!tool) throw new Error(`Unknown xpl tool: ${name}`);
-        const input = z.object(tool.inputSchema).parse(args);
-        const result = await tool.handler(input, {});
+        const result = await tool.handler(args);
         success = !result.isError;
         text = result.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
       } catch (error) {

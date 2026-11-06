@@ -1,25 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { query, tool, createSdkMcpServer, type SDKUserMessage, type Query } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { annotatedDiff, type DiffResult } from "./git.js";
 import { initialPrompt, systemPrompt, LIMITS, proseLimits } from "./prompt.js";
 import { BlockSchema, BlockError, measure, resolveBlocks, type Block } from "./blocks.js";
 import { CodexAgent, CodexTurnError } from "./codex.js";
+import { tool } from "./tools.js";
 
-export type Provider = "claude" | "codex";
-
-export function resolveProvider(value: unknown = process.env.XPL_PROVIDER): Provider {
-  if (typeof value === "string") value = value.trim().toLowerCase();
-  if (value == null || value === "" || value === "claude") return "claude";
-  if (value === "codex") return "codex";
-  throw new Error("AI provider (XPL_PROVIDER) must be claude or codex.");
-}
-
-export function resolveModel(provider: Provider, model?: string): string | undefined {
-  return model?.trim() || (provider === "codex"
-    ? process.env.XPL_CODEX_MODEL
-    : process.env.XPL_CLAUDE_MODEL || process.env.XPL_MODEL) || undefined;
+export function resolveModel(model?: string): string | undefined {
+  return model?.trim() || process.env.XPL_CODEX_MODEL || undefined;
 }
 
 export type LineRange = { hunk_id: string; start: number; end: number };
@@ -70,38 +59,11 @@ interface Turn {
 /** How many steps to prepare ahead of the one being read. */
 const LOOKAHEAD = Math.max(0, Number(process.env.XPL_LOOKAHEAD ?? 2));
 
-/** A simple push-based async iterable for streaming input into the SDK. */
-class Channel<T> implements AsyncIterable<T> {
-  private buf: T[] = [];
-  private waiters: ((r: IteratorResult<T>) => void)[] = [];
-  private closed = false;
-  push(v: T) {
-    const w = this.waiters.shift();
-    if (w) w({ value: v, done: false });
-    else this.buf.push(v);
-  }
-  close() {
-    this.closed = true;
-    for (const w of this.waiters) w({ value: undefined as any, done: true });
-    this.waiters = [];
-  }
-  [Symbol.asyncIterator](): AsyncIterator<T> {
-    return {
-      next: () => {
-        if (this.buf.length) return Promise.resolve({ value: this.buf.shift()!, done: false });
-        if (this.closed) return Promise.resolve({ value: undefined as any, done: true });
-        return new Promise((r) => this.waiters.push(r));
-      },
-    };
-  }
-}
-
 export interface SessionOptions {
   repoRoot: string;
   diff: DiffResult;
   language: string;
   model?: string;
-  provider?: Provider;
 }
 
 export class Session extends EventEmitter {
@@ -124,8 +86,6 @@ export class Session extends EventEmitter {
 
   private turn: Turn | null = null;
   private queue: Turn[] = [];
-  private input = new Channel<SDKUserMessage>();
-  private q?: Query;
   private codex?: CodexAgent;
   private closed = false;
   get isClosed() { return this.closed; }
@@ -187,21 +147,17 @@ export class Session extends EventEmitter {
 
   private pump() {
     if (this.closed) return;
-    if (!this.turn) {
+    if (!this.turn && this.codex) {
       const next = this.queue.shift();
       if (next) {
         this.turn = next;
         this.presentedThisTurn = 0;
-        if (this.codex) {
-          void this.codex.run(next.text).then(() => {
-            if (!this.closed) this.onTurnEnd();
-          }).catch((error) => {
-            if (error instanceof CodexTurnError) this.onTurnEnd(error.message);
-            else this.fail(error);
-          });
-        } else {
-          this.input.push({ type: "user", message: { role: "user", content: next.text }, parent_tool_use_id: null });
-        }
+        void this.codex.run(next.text).then(() => {
+          if (!this.closed) this.onTurnEnd();
+        }).catch((error) => {
+          if (error instanceof CodexTurnError) this.onTurnEnd(error.message);
+          else this.fail(error);
+        });
       }
     }
     this.updateStatus();
@@ -239,7 +195,7 @@ export class Session extends EventEmitter {
     this.updateStatus();
   }
 
-  /* ---------- MCP tools ---------- */
+  /* ---------- explanation tools ---------- */
 
   private buildTools() {
     const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
@@ -401,42 +357,16 @@ export class Session extends EventEmitter {
       return;
     }
 
-    if (resolveProvider(this.opts.provider) === "codex") {
-      this.codex = new CodexAgent({
-        cwd: repoRoot,
-        model: resolveModel("codex", this.opts.model),
-        instructions: systemPrompt(this.opts.language, "read-only shell commands"),
-        tools: this.buildTools(),
-        onActivity: (text) => this.emitEvent({ type: "activity", text }),
-        onError: (error) => this.fail(error),
-      });
-      await this.codex.start();
-      this.enqueue({ kind: "plan", text: initialPrompt(diff) });
-      return;
-    }
-
-    const env: Record<string, string | undefined> = { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "xpl/0.2.0" };
-    // Use the user's Claude subscription (claude login) rather than an API key unless explicitly opted in.
-    if (!process.env.XPL_USE_API_KEY) delete env.ANTHROPIC_API_KEY;
-
-    const xplTools = ["get_diff", "submit_plan", "present_step", "answer_question"].map((t) => `mcp__xpl__${t}`);
-    this.q = query({
-      prompt: this.input,
-      options: {
-        cwd: repoRoot,
-        model: resolveModel("claude", this.opts.model),
-        systemPrompt: systemPrompt(this.opts.language),
-        tools: ["Read", "Grep", "Glob"],
-        allowedTools: ["Read", "Grep", "Glob", ...xplTools],
-        permissionMode: "dontAsk",
-        settingSources: [],
-        mcpServers: { xpl: createSdkMcpServer({ name: "xpl", version: "0.2.0", alwaysLoad: true, tools: this.buildTools() }) },
-        env,
-      },
+    this.codex = new CodexAgent({
+      cwd: repoRoot,
+      model: resolveModel(this.opts.model),
+      instructions: systemPrompt(this.opts.language),
+      tools: this.buildTools(),
+      onActivity: (text) => this.emitEvent({ type: "activity", text }),
+      onError: (error) => this.fail(error),
     });
-
+    await this.codex.start();
     this.enqueue({ kind: "plan", text: initialPrompt(diff) });
-    this.consume().catch((e) => this.fail(e));
   }
 
   private fail(error: unknown) {
@@ -446,33 +376,6 @@ export class Session extends EventEmitter {
     this.turn = null;
     this.queue = [];
     this.setPhase("failed");
-  }
-
-  private async consume() {
-    for await (const msg of this.q!) {
-      if (msg.type === "assistant") {
-        for (const block of msg.message.content as any[]) {
-          if (block.type !== "tool_use") continue;
-          const input = block.input ?? {};
-          const name: string = block.name;
-          const text =
-            name === "Read"
-              ? `Read ${rel(input.file_path, this.opts.repoRoot)}`
-              : name === "Grep"
-                ? `Grep "${input.pattern}"`
-                : name === "Glob"
-                  ? `Glob ${input.pattern}`
-                  : name === "mcp__xpl__get_diff"
-                    ? `diff ${[...(input.file_ids ?? []), ...(input.hunk_ids ?? [])].join(", ")}`
-                    : "";
-          if (text) this.emitEvent({ type: "activity", text });
-        }
-      } else if (msg.type === "result") {
-        const error = msg.subtype !== "success" || (msg as any).is_error
-          ? (msg as any).result || (msg as any).errors?.join("\n") || msg.subtype : undefined;
-        this.onTurnEnd(error);
-      }
-    }
   }
 
   private onTurnEnd(error?: string) {
@@ -568,12 +471,5 @@ export class Session extends EventEmitter {
   close() {
     this.closed = true;
     this.codex?.close();
-    this.input.close();
-    this.q?.close();
   }
-}
-
-function rel(p: string | undefined, root: string) {
-  if (!p) return "";
-  return p.startsWith(root) ? p.slice(root.length + 1) : p;
 }

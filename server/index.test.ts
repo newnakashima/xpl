@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { chmod, copyFile, mkdtemp, rm } from "node:fs/promises";
+import { chmod, copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,24 +10,17 @@ import { promisify } from "node:util";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 
-test("invalid provider configuration fails visibly before the server starts listening", async () => {
-  await assert.rejects(promisify(execFile)(process.execPath, ["--import", "tsx", "server/index.ts"], {
-    cwd: root, env: { ...process.env, PORT: "0", XPL_PROVIDER: "invalid-provider" }, timeout: 5000,
-  }), (error: any) => {
-    assert.match(error.stderr, /XPL_PROVIDER/);
-    assert.doesNotMatch(error.stdout, /xpl running/);
-    return true;
-  });
-});
-
-test("a failed session streams failure, rejects later actions with 410, and can be deleted", async () => {
+test("a session uses Codex by default, streams failure, rejects later actions with 410, and can be deleted", async () => {
   const temporary = await mkdtemp(path.join(tmpdir(), "xpl-api-test-"));
+  const repo = path.join(temporary, "repo");
+  await promisify(execFile)("git", ["init", repo]);
+  await writeFile(path.join(repo, "example.ts"), "export const value = 1;\n");
   const executable = path.join(temporary, "codex");
   await copyFile(fileURLToPath(new URL("./fixtures/codex.mjs", import.meta.url)), executable);
   await chmod(executable, 0o755);
   const child = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
     cwd: root,
-    env: { ...process.env, PORT: "0", XPL_REPO: root, XPL_PROVIDER: "codex", XPL_CODEX_PATH: executable, XPL_USE_API_KEY: "", XPL_TEST_MODE: "fatal" },
+    env: { ...process.env, PORT: "0", XPL_REPO: repo, XPL_CODEX_PATH: executable, XPL_USE_API_KEY: "", XPL_TEST_MODE: "fatal" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stderr = "";
@@ -48,10 +41,11 @@ test("a failed session streams failure, rejects later actions with 410, and can 
     const request = (endpoint: string, body?: unknown) => fetch(url + endpoint, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000),
     });
-    assert.equal((await (await fetch(url + "/api/config")).json()).defaultProvider, "codex");
-    const created = await request("/api/sessions", { repoPath: root, source: { kind: "commit", sha: "HEAD" } });
+    assert.deepEqual(await (await fetch(url + "/api/config")).json(), { defaultRepo: repo });
+    const created = await request("/api/sessions", { repoPath: repo, source: { kind: "working" } });
     assert.equal(created.status, 200);
-    const { id } = await created.json();
+    const { id, files } = await created.json();
+    assert.equal(files, 1);
     const events = await fetch(`${url}/api/sessions/${id}/events`, { signal: AbortSignal.timeout(5000) });
     assert.equal(events.status, 200);
     const reader = events.body!.getReader();

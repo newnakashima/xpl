@@ -3,7 +3,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getDiff, getRepoInfo, resolveRepoRoot, type DiffSource } from "./git.js";
-import { Session, resolveProvider } from "./session.js";
+import { Session } from "./session.js";
 import { SessionRegistry } from "./sessions.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -11,8 +11,6 @@ const app = express();
 app.use(express.json({ limit: "2mb" }));
 
 const defaultRepo = path.resolve(process.env.XPL_REPO || process.argv[2] || process.cwd());
-// Validate configuration before listening so startup failures are visible.
-const defaultProvider = resolveProvider();
 const sessions = new SessionRegistry();
 
 // Only accept requests from localhost origins (basic CSRF protection for a local tool).
@@ -26,7 +24,7 @@ app.use("/api", (req, res, next) => {
 });
 
 app.get("/api/config", (_req, res) => {
-  res.json({ defaultRepo, defaultProvider });
+  res.json({ defaultRepo });
 });
 
 app.get("/api/repo", async (req, res) => {
@@ -39,17 +37,15 @@ app.get("/api/repo", async (req, res) => {
 
 app.post("/api/sessions", async (req, res) => {
   try {
-    const { repoPath, source, language, model, provider } = req.body as {
+    const { repoPath, source, language, model } = req.body as {
       repoPath: string;
       source: DiffSource;
       language?: string;
       model?: string;
-      provider?: string;
     };
-    const selectedProvider = resolveProvider(provider ?? defaultProvider);
     const root = await resolveRepoRoot(repoPath || defaultRepo);
     const diff = await getDiff(root, source);
-    const s = new Session({ repoRoot: root, diff, language: language || "日本語", model, provider: selectedProvider });
+    const s = new Session({ repoRoot: root, diff, language: language || "日本語", model });
     try {
       await s.start();
     } catch (error) {
