@@ -93,6 +93,18 @@ app.post("/api/sessions/:id/next", (req, res) => {
   res.json({ ok: true });
 });
 
+app.get("/api/sessions/:id/files/:fileId", async (req, res) => {
+  const s = getSession(req.params.id, res);
+  if (!s) return;
+  const rows = s.getFileRows(req.params.fileId);
+  if (!rows) { res.status(404).json({ error: "file not found" }); return; }
+  try {
+    res.json({ rows: await rows });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 app.post("/api/sessions/:id/questions", (req, res) => {
   const s = getSession(req.params.id, res);
   if (!s) return;

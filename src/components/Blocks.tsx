@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import hljs from "highlight.js/lib/common";
 import "highlight.js/styles/github.css";
 import "./code-theme.css";
@@ -59,8 +59,7 @@ function Lines({
       {rows.map((r, i) => {
         const n = side === "old" ? r.oldN : side === "new" ? r.newN : lineNo(r, view);
         const ns = showNotes && n != null && !(r.kind === "del" && view !== "old") ? notes.get(n) : undefined;
-        const marked = view !== "new" || (r.kind === "add" && block.fileStatus !== "added");
-        const cls = ["line", marked ? `k-${r.kind}` : "", n != null && hl.has(n) && !(r.kind === "del" && view !== "old") ? "hl" : "", ns ? "has-note" : ""].join(" ");
+        const cls = ["line", `k-${r.kind}`, n != null && hl.has(n) && !(r.kind === "del" && view !== "old") ? "hl" : "", ns ? "has-note" : ""].join(" ");
         return (
           <Fragment key={i}>
             <div className={cls}>
@@ -85,16 +84,61 @@ function Lines({
   );
 }
 
-export function CodeBlock({ block }: { block: CodeBlockT }) {
+export function CodeBlock({ block, sessionId }: { block: CodeBlockT; sessionId?: string }) {
   const [wrap, setWrap] = useState(true);
-  const html = useHighlighted(block.rows, block.lang);
-  const indexed = block.rows.map((r, i) => ({ r, h: html[i] }));
+  const [showFull, setShowFull] = useState(false);
+  const [fullRows, setFullRows] = useState<Row[] | null>(null);
+  const [error, setError] = useState("");
+  const fileId = block.fileId;
+  useEffect(() => {
+    setShowFull(false);
+    setFullRows(null);
+    setError("");
+  }, [block, sessionId]);
+  useEffect(() => {
+    if (!showFull || fullRows || !sessionId || !fileId) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(fileId)}`, { signal: controller.signal });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "全文を読み込めませんでした");
+        if (!controller.signal.aborted) setFullRows(result.rows);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setError(error instanceof Error ? error.message : String(error));
+        setShowFull(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [showFull, fullRows, sessionId, fileId]);
+  const expanded = showFull && fullRows !== null;
+  // Full resulting-code blocks also show removed lines so all changes are visible.
+  const view = expanded && block.view === "new" ? "diff" : block.view;
+  const rows = useMemo(() => {
+    if (!expanded) return block.rows;
+    return view === "old" ? fullRows.filter((r) => r.kind !== "add") : fullRows;
+  }, [expanded, fullRows, block.rows, view]);
+  const html = useHighlighted(rows, block.lang);
+  const indexed = rows.map((r, i) => ({ r, h: html[i] }));
   return (
-    <figure className={`codeblock view-${block.view}${wrap ? "" : " nowrap"}`}>
+    <figure className={`codeblock view-${view}${wrap ? "" : " nowrap"}`}>
       <figcaption className="cb-head">
         <span className="cb-file">{block.file}</span>
         <div className="cb-actions">
-          <span className="cb-view">{VIEW_LABEL[block.view]}</span>
+          <span className="cb-view">{expanded ? "全文 · " : ""}{VIEW_LABEL[view]}</span>
+          {sessionId && block.fileId && (
+            <button
+              type="button"
+              className="cb-full"
+              aria-label="ファイルの全文表示"
+              aria-pressed={showFull}
+              title={showFull ? "解説の抜粋に戻す" : "ファイル全体を表示する"}
+              onClick={() => { setError(""); setShowFull((value) => !value); }}
+            >
+              {showFull ? "抜粋表示" : "全文表示"}
+            </button>
+          )}
           <button
             type="button"
             className="cb-wrap"
@@ -107,7 +151,9 @@ export function CodeBlock({ block }: { block: CodeBlockT }) {
           </button>
         </div>
       </figcaption>
-      {block.view === "split" ? (
+      {showFull && !fullRows && <div className="cb-status" role="status">全文を読み込んでいます…</div>}
+      {error && <div className="cb-error" role="alert">{error}</div>}
+      {view === "split" ? (
         <div className="split">
           <div className="split-pane">
             <div className="split-label">変更前</div>
@@ -125,7 +171,7 @@ export function CodeBlock({ block }: { block: CodeBlockT }) {
           </div>
         </div>
       ) : (
-        <Lines rows={block.rows} html={html} view={block.view} block={block} />
+        <Lines rows={rows} html={html} view={view} block={block} />
       )}
       {block.caption && <figcaption className="cb-caption">{block.caption}</figcaption>}
     </figure>
@@ -134,7 +180,7 @@ export function CodeBlock({ block }: { block: CodeBlockT }) {
 
 const TONE_LABEL = { info: "補足", tip: "ヒント", risk: "注意" } as const;
 
-export function Blocks({ blocks }: { blocks: Block[] }) {
+export function Blocks({ blocks, sessionId }: { blocks: Block[]; sessionId?: string }) {
   return (
     <div className="blocks">
       {blocks.map((b, i) => {
@@ -149,7 +195,7 @@ export function Blocks({ blocks }: { blocks: Block[] }) {
               </div>
             );
           case "code":
-            return <CodeBlock key={i} block={b} />;
+            return <CodeBlock key={i} block={b} sessionId={sessionId} />;
           case "mermaid":
             return (
               <figure key={i} className="visual">

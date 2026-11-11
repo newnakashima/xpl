@@ -34,6 +34,8 @@ export interface DiffResult {
   description?: string;
   files: FileDiff[];
   raw: string;
+  /** Full resulting file at the same revision as the diff (working files are snapshotted). */
+  readFile?: (file: FileDiff) => Promise<string>;
 }
 
 const MAX_BUFFER = 256 * 1024 * 1024;
@@ -122,6 +124,7 @@ export async function getDiff(repoPath: string, source: DiffSource): Promise<Dif
   let raw = "";
   let title = "";
   let description: string | undefined;
+  let readFile: DiffResult["readFile"];
 
   switch (source.kind) {
     case "working": {
@@ -148,14 +151,18 @@ export async function getDiff(repoPath: string, source: DiffSource): Promise<Dif
     }
     case "branch": {
       const head = source.head || "HEAD";
-      raw = await git(root, ["diff", ...common, `${source.base}...${head}`]);
+      const revision = (await git(root, ["rev-parse", "--verify", `${head}^{commit}`])).trim();
+      raw = await git(root, ["diff", ...common, `${source.base}...${revision}`]);
+      readFile = (file) => git(root, ["show", `${revision}:${file.newPath}`]);
       title = `${source.base}...${head}`;
       const log = await git(root, ["log", "--format=- %s", `${source.base}..${head}`]).catch(() => "");
       if (log.trim()) description = `Commits:\n${log}`;
       break;
     }
     case "commit": {
-      raw = await git(root, ["show", ...common, "--format=", source.sha]);
+      const revision = (await git(root, ["rev-parse", "--verify", `${source.sha}^{commit}`])).trim();
+      raw = await git(root, ["show", ...common, "--format=", revision]);
+      readFile = (file) => git(root, ["show", `${revision}:${file.newPath}`]);
       const meta = await git(root, ["show", "-s", "--format=%h %s%n%n%b", source.sha]);
       title = `Commit ${meta.split("\n")[0]}`;
       description = meta;
@@ -164,8 +171,19 @@ export async function getDiff(repoPath: string, source: DiffSource): Promise<Dif
     case "pr": {
       raw = await run("gh", ["pr", "diff", String(source.number), "--color=never"], root);
       const meta = JSON.parse(
-        await run("gh", ["pr", "view", String(source.number), "--json", "title,body,headRefName,baseRefName"], root)
+        await run("gh", ["pr", "view", String(source.number), "--json", "title,body,headRefName,baseRefName,headRefOid,headRepository,headRepositoryOwner"], root)
       );
+      readFile = async (file) => {
+        try {
+          return await git(root, ["show", `${meta.headRefOid}:${file.newPath}`]);
+        } catch {
+          // PR heads (including forks) need not be checked out or fetched locally.
+          const repository = `${meta.headRepositoryOwner.login}/${meta.headRepository.name}`;
+          const filePath = file.newPath.split("/").map(encodeURIComponent).join("/");
+          return run("gh", ["api", `repos/${repository}/contents/${filePath}?ref=${meta.headRefOid}`,
+            "-H", "Accept: application/vnd.github.raw+json"], root);
+        }
+      };
       title = `PR #${source.number}: ${meta.title}`;
       description = `${meta.baseRefName} <- ${meta.headRefName}\n\n${meta.body ?? ""}`;
       break;
@@ -182,7 +200,27 @@ export async function getDiff(repoPath: string, source: DiffSource): Promise<Dif
     f.hunks.forEach((h, j) => (h.id = `${id}H${j + 1}`));
     f.id = id;
   });
-  return { title, description, files, raw };
+  if (source.kind === "working") {
+    // The user may keep editing while reading. Do not mix those later edits
+    // into the diff or its line numbers when they open the full file.
+    const snapshots = new Map<string, string | Error>();
+    await Promise.all(files.filter((f) => f.status !== "deleted" && f.status !== "added" && f.status !== "binary").map(async (file) => {
+      try {
+        const abs = path.join(root, file.newPath);
+        const stat = await fs.lstat(abs);
+        snapshots.set(file.id, stat.isSymbolicLink() ? await fs.readlink(abs) : await fs.readFile(abs, "utf8"));
+      } catch {
+        snapshots.set(file.id, new Error(`ファイルを読み込めません: ${file.newPath}`));
+      }
+    }));
+    readFile = async (file) => {
+      const snapshot = snapshots.get(file.id);
+      if (snapshot instanceof Error) throw snapshot;
+      if (snapshot === undefined) throw new Error(`ファイルを読み込めません: ${file.newPath}`);
+      return snapshot;
+    };
+  }
+  return { title, description, files, raw, readFile };
 }
 
 const NOISE = [
