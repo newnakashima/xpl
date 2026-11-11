@@ -1,4 +1,4 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import hljs from "highlight.js/lib/common";
 import "highlight.js/styles/github.css";
 import "./code-theme.css";
@@ -86,13 +86,26 @@ function Lines({
 }
 
 export function CodeBlock({ block }: { block: CodeBlockT }) {
+  const [wrap, setWrap] = useState(true);
   const html = useHighlighted(block.rows, block.lang);
   const indexed = block.rows.map((r, i) => ({ r, h: html[i] }));
   return (
-    <figure className={`codeblock view-${block.view}`}>
+    <figure className={`codeblock view-${block.view}${wrap ? "" : " nowrap"}`}>
       <figcaption className="cb-head">
         <span className="cb-file">{block.file}</span>
-        <span className="cb-view">{VIEW_LABEL[block.view]}</span>
+        <div className="cb-actions">
+          <span className="cb-view">{VIEW_LABEL[block.view]}</span>
+          <button
+            type="button"
+            className="cb-wrap"
+            aria-label="コードの折り返し"
+            aria-pressed={wrap}
+            title={wrap ? "折り返しを無効にする" : "折り返しを有効にする"}
+            onClick={() => setWrap((value) => !value)}
+          >
+            {wrap ? "wrap" : "nowrap"}
+          </button>
+        </div>
       </figcaption>
       {block.view === "split" ? (
         <div className="split">
