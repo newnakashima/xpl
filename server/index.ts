@@ -96,13 +96,19 @@ app.post("/api/sessions/:id/next", (req, res) => {
 app.post("/api/sessions/:id/questions", (req, res) => {
   const s = getSession(req.params.id, res);
   if (!s) return;
-  const { text, mode } = req.body as { text: string; mode: "now" | "later" };
+  const { text, mode, afterStep } = req.body as { text: string; mode: "now" | "later"; afterStep?: number };
   if (!text?.trim()) {
     res.status(400).json({ error: "empty question" });
     return;
   }
-  if (!s.ask(text.trim(), mode === "later" ? "later" : "now")) {
-    res.status(410).json({ error: "セッションは中断されています。差分を選び直してください。" });
+  try {
+    if (!s.ask(text.trim(), mode === "later" ? "later" : "now", afterStep)) {
+      res.status(410).json({ error: "セッションは中断されています。差分を選び直してください。" });
+      return;
+    }
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    res.status(400).json({ error: error.message });
     return;
   }
   res.json({ ok: true });

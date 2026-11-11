@@ -94,7 +94,8 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
           assert.equal((await call("present_step", { index: 1, title: "変更点", blocks })).result.success, true);
         } else {
           const ids = [...text.matchAll(/\[(Q\d+)\]/g)].map((match) => match[1]);
-          for (const question_id of ids) assert.equal((await call("answer_question", { question_id, blocks })).result.success, true);
+          const answerBlocks = mode === "question-context" ? [{ type: "text", markdown: text }] : blocks;
+          for (const question_id of ids) assert.equal((await call("answer_question", { question_id, blocks: answerBlocks })).result.success, true);
         }
       }
       complete(text === "fail");
