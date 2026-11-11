@@ -6,6 +6,7 @@ import { initialPrompt, systemPrompt, LIMITS, proseLimits } from "./prompt.js";
 import { BlockSchema, BlockError, measure, resolveBlocks, type Block } from "./blocks.js";
 import { CodexAgent, CodexTurnError } from "./codex.js";
 import { tool } from "./tools.js";
+import { fullFileRows, type Row } from "./file-rows.js";
 
 export function resolveModel(model?: string): string | undefined {
   return model?.trim() || process.env.XPL_CODEX_MODEL || undefined;
@@ -91,11 +92,33 @@ export class Session extends EventEmitter {
   get isClosed() { return this.closed; }
   private hunkIds: Set<string>;
   private planRejected = false;
+  private fullFiles = new Map<string, () => Promise<Row[]>>();
+  private fullFileCache = new Map<string, Promise<Row[]>>();
 
   constructor(private opts: SessionOptions) {
     super();
     this.setMaxListeners(100);
     this.hunkIds = new Set(opts.diff.files.flatMap((f) => f.hunks.map((h) => h.id)));
+    const readFile = opts.diff.readFile;
+    if (readFile) for (const file of opts.diff.files) {
+      if (file.status === "binary") continue;
+      this.fullFiles.set(file.id, async () => fullFileRows(file,
+        file.status === "added" || file.status === "deleted" ? "" : await readFile(file)));
+    }
+  }
+
+  getFileRows(fileId: string): Promise<Row[]> | undefined {
+    const load = this.fullFiles.get(fileId);
+    if (!load) return undefined;
+    let result = this.fullFileCache.get(fileId);
+    if (!result) {
+      result = load().catch((error) => {
+        this.fullFileCache.delete(fileId);
+        throw error;
+      });
+      this.fullFileCache.set(fileId, result);
+    }
+    return result;
   }
 
   /* ---------- events ---------- */
@@ -201,7 +224,7 @@ export class Session extends EventEmitter {
     const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
     const err = (text: string) => ({ content: [{ type: "text" as const, text }], isError: true });
     const { files } = this.opts.diff;
-    const ctx = { files, repoRoot: this.opts.repoRoot };
+    const ctx = { files, repoRoot: this.opts.repoRoot, fullFiles: this.fullFiles };
     const prose = proseLimits(this.opts.language);
 
     return [

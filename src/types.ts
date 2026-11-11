@@ -15,6 +15,7 @@ export interface CodeBlock {
   notes: { line: number; text: string }[];
   caption?: string;
   fileStatus?: string;
+  fileId?: string;
 }
 
 export type Block =

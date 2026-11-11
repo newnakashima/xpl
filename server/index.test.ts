@@ -140,3 +140,23 @@ test("questions use the viewed step for events and AI context without changing s
     }
   });
 });
+
+test("full-file API serves only registered files, including after the agent stops", async () => {
+  await withServer("fatal", async (url, repo) => {
+    const created = await fetch(url + "/api/sessions", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repoPath: repo, source: { kind: "working" } }),
+    });
+    assert.equal(created.status, 200);
+    const { id } = await created.json();
+    const endpoint = `${url}/api/sessions/${id}/files/`;
+    const response = await fetch(endpoint + "F1");
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { rows: [{ kind: "add", newN: 1, text: "export const value = 1;" }] });
+    assert.equal((await fetch(endpoint + "missing")).status, 404);
+    assert.equal((await fetch(endpoint + encodeURIComponent("../example.ts"))).status, 404);
+    assert.equal((await fetch(`${url}/api/sessions/missing/files/F1`)).status, 404);
+    await fetch(`${url}/api/sessions/${id}`, { method: "DELETE" });
+    assert.equal((await fetch(endpoint + "F1")).status, 404);
+  });
+});

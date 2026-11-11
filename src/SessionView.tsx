@@ -143,7 +143,7 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return;
+      if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT" || (e.target as HTMLElement)?.closest("button, a")) return;
       if (e.key === "ArrowRight" || e.key === "Enter") {
         e.preventDefault();
         next();
@@ -307,7 +307,7 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
                 </div>
                 <h2>質問への回答</h2>
                 {laterQs.map((q) => (
-                  <QA key={q.id} q={q} a={s.answers[q.id]} failed={s.phase === "failed"} />
+                  <QA key={q.id} q={q} a={s.answers[q.id]} failed={s.phase === "failed"} sessionId={id} />
                 ))}
                 {s.phase === "finished" && finished}
               </div>
@@ -320,9 +320,9 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
                   </span>
                 </div>
                 <h2>{step.title}</h2>
-                <Blocks blocks={step.blocks} />
+                <Blocks blocks={step.blocks} sessionId={id} />
                 {stepQuestions(step.index).map((q) => (
-                  <QA key={q.id} q={q} a={s.answers[q.id]} failed={s.phase === "failed"} />
+                  <QA key={q.id} q={q} a={s.answers[q.id]} failed={s.phase === "failed"} sessionId={id} />
                 ))}
                 {s.phase === "finished" && step.index === total - 1 && !laterQs.length && finished}
               </article>
@@ -406,7 +406,7 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
   );
 }
 
-function QA({ q, a, failed }: { q: Question; a?: Answer; failed?: boolean }) {
+function QA({ q, a, failed, sessionId }: { q: Question; a?: Answer; failed?: boolean; sessionId: string }) {
   return (
     <div className="qa">
       <div className="q">
@@ -415,7 +415,7 @@ function QA({ q, a, failed }: { q: Question; a?: Answer; failed?: boolean }) {
       </div>
       {a ? (
         <div className="a">
-          <Blocks blocks={a.blocks} />
+          <Blocks blocks={a.blocks} sessionId={sessionId} />
         </div>
       ) : (
         <div className="a pending">{failed ? "中断したため回答できませんでした" : q.mode === "later" ? "すべてのステップのあとに回答します" : "回答を書いています…"}</div>

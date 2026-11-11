@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { displayPath, type FileDiff, type Hunk } from "./git.js";
+import { hunkRows, textRows, type Row } from "./file-rows.js";
+export type { Row } from "./file-rows.js";
 
 /* ---------- Schema the AI writes ---------- */
 
@@ -50,13 +52,6 @@ export type BlockInput = z.infer<typeof BlockSchema>;
 
 /* ---------- Resolved blocks sent to the UI ---------- */
 
-export interface Row {
-  kind: "add" | "del" | "ctx";
-  oldN?: number;
-  newN?: number;
-  text: string;
-}
-
 export type Block =
   | { type: "text"; markdown: string }
   | { type: "callout"; tone: "info" | "tip" | "risk"; markdown: string }
@@ -70,24 +65,10 @@ export type Block =
       notes: { line: number; text: string }[];
       caption?: string;
       fileStatus?: FileDiff["status"];
+      fileId?: string;
     }
   | { type: "mermaid"; code: string; title?: string }
   | { type: "html"; code: string; title?: string };
-
-function hunkRows(h: Hunk): Row[] {
-  let o = h.oldStart;
-  let n = h.newStart;
-  const rows: Row[] = [];
-  for (const l of h.lines) {
-    const c = l[0];
-    if (c === "\\") continue;
-    const text = l.slice(1);
-    if (c === "+") rows.push({ kind: "add", newN: n++, text });
-    else if (c === "-") rows.push({ kind: "del", oldN: o++, text });
-    else rows.push({ kind: "ctx", oldN: o++, newN: n++, text });
-  }
-  return rows;
-}
 
 const EXT_LANG: Record<string, string> = {
   ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
@@ -104,6 +85,7 @@ export function langOf(file: string) {
 export interface ResolveCtx {
   files: FileDiff[];
   repoRoot: string;
+  fullFiles?: Map<string, () => Promise<Row[]>>;
 }
 
 export class BlockError extends Error {}
@@ -153,6 +135,7 @@ export function resolveBlocks(input: BlockInput[], ctx: ResolveCtx): Block[] {
           notes: b.notes ?? [],
           caption: b.caption,
           fileStatus: hit.f.status,
+          fileId: ctx.fullFiles?.has(hit.f.id) ? hit.f.id : undefined,
         };
       }
       case "context": {
@@ -164,12 +147,14 @@ export function resolveBlocks(input: BlockInput[], ctx: ResolveCtx): Block[] {
         } catch {
           throw new BlockError(`Cannot read ${b.file}`);
         }
-        const lines = text.split("\n");
+        const allRows = textRows(text);
         const s = Math.max(1, b.start);
-        const e = Math.min(lines.length, b.end);
+        const e = Math.min(allRows.length, b.end);
         if (e < s) throw new BlockError(`Bad range for ${b.file}`);
-        const rows: Row[] = [];
-        for (let i = s; i <= e; i++) rows.push({ kind: "ctx", newN: i, oldN: i, text: lines[i - 1] });
+        const rows = allRows.slice(s - 1, e);
+        // Each context block retains exactly the file it was resolved against.
+        const fileId = ctx.fullFiles ? `context-${ctx.fullFiles.size}` : undefined;
+        if (fileId) ctx.fullFiles?.set(fileId, async () => allRows);
         return {
           type: "code",
           file: b.file,
@@ -179,6 +164,7 @@ export function resolveBlocks(input: BlockInput[], ctx: ResolveCtx): Block[] {
           highlight: b.highlight ?? [],
           notes: b.notes ?? [],
           caption: b.caption,
+          fileId,
         };
       }
     }
