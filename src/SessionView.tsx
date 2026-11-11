@@ -130,7 +130,7 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
       const response = await fetch(`/api/sessions/${id}/questions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: t, mode }),
+        body: JSON.stringify({ text: t, mode, afterStep: step?.index }),
       });
       if (!response.ok) throw new Error((await response.json()).error);
       // Keep anything typed while the request was in flight.

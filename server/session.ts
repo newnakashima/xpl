@@ -73,7 +73,7 @@ export class Session extends EventEmitter {
   plan: PlanStep[] = [];
   questions: Question[] = [];
 
-  /** Index of the step the human is currently reading (-1 = none yet). */
+  /** Index of the latest revealed step (-1 = none yet); the UI may be reviewing an earlier one. */
   private currentStep = -1;
   /** Human pressed OK (or session started) and wants currentStep+1 as soon as it is ready. */
   private wantNext = true;
@@ -442,13 +442,16 @@ export class Session extends EventEmitter {
     });
   }
 
-  ask(text: string, mode: "now" | "later") {
+  ask(text: string, mode: "now" | "later", afterStep?: number) {
     if (this.closed) return false;
+    if (afterStep !== undefined && (!Number.isInteger(afterStep) || afterStep < 0 || afterStep > this.currentStep)) {
+      throw new RangeError("質問するステップは表示済みのステップを指定してください。");
+    }
     const qn: Question = {
       id: `Q${this.questions.length + 1}`,
       text,
       mode,
-      afterStep: Math.max(0, this.currentStep),
+      afterStep: afterStep ?? Math.max(0, this.currentStep),
       answered: false,
     };
     this.questions.push(qn);
@@ -456,7 +459,7 @@ export class Session extends EventEmitter {
     if (mode === "later" && (this.phase === "planning" || this.phase === "stepping")) return true;
     if (this.phase === "finished") this.setPhase("final_qa");
     const where =
-      this.currentStep >= 0 ? ` while reading step ${this.currentStep + 1} "${this.plan[this.currentStep]?.title}"` : "";
+      this.currentStep >= 0 ? ` while reading step ${qn.afterStep + 1} "${this.plan[qn.afterStep]?.title}"` : "";
     this.enqueue(
       {
         kind: "question",
