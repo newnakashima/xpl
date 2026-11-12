@@ -255,12 +255,12 @@ export class Session extends EventEmitter {
           "submit_plan",
           `Submit the ordered plan of small steps (each ≤ ~${LIMITS.stepCodeLines} lines of code). Call once.`,
           {
-            overview: z.string().describe("2-3 sentence summary of the whole change"),
+            overview: z.string().describe("2-3 sentences on the problem being solved and why this approach addresses it; label inferred rationale"),
             steps: z
               .array(
                 z.object({
                   section: z.string().describe("Short group name, e.g. 'データモデル'"),
-                  title: z.string().describe("Short step title"),
+                  title: z.string().describe("Short step title emphasizing the purpose or rationale"),
                   hunk_ids: z.array(z.string()).describe("Hunks shown in this step ([] for overview/visual-only)"),
                   line_ranges: z
                     .array(z.object({ hunk_id: z.string(), start: z.number().int(), end: z.number().int() }))
