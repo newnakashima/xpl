@@ -53,6 +53,7 @@ test("full working files keep gaps, all hunks, line numbers, and the session-sta
   });
   assert.ok(blocks[0].type === "code");
   assert.equal(blocks[0].fileId, "F1");
+  assert.equal(blocks[0].filePath, "example.ts");
   assert.ok(blocks[0].rows.length < rows.length);
 });
 
@@ -94,6 +95,12 @@ test("added and deleted files need no disk content, and renamed files retain bot
   assertVersions(fullFileRows(added, ""), "", "added\n\nlast line\n");
   assertVersions(fullFileRows(deleted, ""), "deleted\n\nlast line", "");
   assertVersions(fullFileRows(renamed, await diff.readFile!(renamed)), original, changed);
+  for (const [file, expectedPath] of [[added, "added.ts"], [deleted, "deleted.ts"], [renamed, "renamed.ts"]] as const) {
+    const [block] = resolveBlocks([{ type: "code", hunk_id: file.hunks[0].id }], { repoRoot: repo.root, files: diff.files });
+    assert.ok(block.type === "code");
+    assert.equal(block.filePath, expectedPath);
+    if (file === renamed) assert.equal(block.file, "old.ts → renamed.ts");
+  }
 });
 
 test("context blocks register their own unchanged snapshot without a phantom trailing line", async (t) => {
@@ -104,6 +111,7 @@ test("context blocks register their own unchanged snapshot without a phantom tra
     repoRoot: repo.root, files: [], fullFiles,
   });
   assert.ok(block.type === "code" && block.fileId);
+  assert.equal(block.filePath, "context.ts");
   assert.deepEqual(block.rows.map((r) => r.newN), [8, 9]);
   await repo.save("context.ts", "later\n");
   const rows = await fullFiles.get(block.fileId)!();
