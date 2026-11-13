@@ -84,6 +84,38 @@ function Lines({
   );
 }
 
+function CopyPathButton({ path }: { path: string }) {
+  const [status, setStatus] = useState<"idle" | "copying" | "copied" | "error">("idle");
+  useEffect(() => {
+    if (status !== "copied" && status !== "error") return;
+    const timer = setTimeout(() => setStatus("idle"), 2000);
+    return () => clearTimeout(timer);
+  }, [status]);
+
+  async function copy() {
+    setStatus("copying");
+    try {
+      await navigator.clipboard.writeText(path);
+      setStatus("copied");
+    } catch {
+      setStatus("error");
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className="cb-copy"
+      title="プロジェクトルートからの相対パスをコピー"
+      aria-live="polite"
+      disabled={status === "copying"}
+      onClick={() => void copy()}
+    >
+      {status === "copied" ? "コピーしました" : status === "error" ? "コピーできませんでした" : status === "copying" ? "コピー中…" : "パスをコピー"}
+    </button>
+  );
+}
+
 export function CodeBlock({ block, sessionId }: { block: CodeBlockT; sessionId?: string }) {
   const [wrap, setWrap] = useState(true);
   const [showFull, setShowFull] = useState(false);
@@ -127,6 +159,7 @@ export function CodeBlock({ block, sessionId }: { block: CodeBlockT; sessionId?:
         <span className="cb-file">{block.file}</span>
         <div className="cb-actions">
           <span className="cb-view">{expanded ? "全文 · " : ""}{VIEW_LABEL[view]}</span>
+          <CopyPathButton key={block.filePath} path={block.filePath} />
           {sessionId && block.fileId && (
             <button
               type="button"

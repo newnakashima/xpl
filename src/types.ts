@@ -8,6 +8,7 @@ export interface Row {
 export interface CodeBlock {
   type: "code";
   file: string;
+  filePath: string;
   lang: string;
   view: "new" | "diff" | "split" | "old" | "context";
   rows: Row[];

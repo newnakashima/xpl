@@ -58,6 +58,7 @@ export type Block =
   | {
       type: "code";
       file: string;
+      filePath: string;
       lang: string;
       view: "new" | "diff" | "split" | "old" | "context";
       rows: Row[];
@@ -128,6 +129,7 @@ export function resolveBlocks(input: BlockInput[], ctx: ResolveCtx): Block[] {
         return {
           type: "code",
           file: displayPath(hit.f),
+          filePath: hit.f.status === "deleted" ? hit.f.oldPath : hit.f.newPath,
           lang: langOf(hit.f.newPath || hit.f.oldPath),
           view,
           rows,
@@ -158,6 +160,7 @@ export function resolveBlocks(input: BlockInput[], ctx: ResolveCtx): Block[] {
         return {
           type: "code",
           file: b.file,
+          filePath: path.relative(ctx.repoRoot, abs),
           lang: langOf(b.file),
           view: "context",
           rows,
