@@ -306,7 +306,7 @@ kbd {
 .line .sign { color: var(--usuzumi); user-select: none; text-align: center; }
 .line .src { white-space: pre-wrap; word-break: break-word; padding: 0 14px 0 0; background: none; font-size: inherit; border-radius: 0; }
 /* Size all unwrapped rows together so backgrounds and notes scroll with the code. */
-.codeblock.nowrap .lines { display: grid; grid-template-columns: minmax(100%, max-content); }
+.codeblock.nowrap .lines { display: grid; grid-template-columns: minmax(max-content, 100%); }
 .codeblock.nowrap .line { grid-template-columns: 3.6em 1.6em auto; }
 .codeblock.nowrap .lines.with-notes .line { grid-template-columns: 3.6em 1.6em auto 20em; }
 .codeblock.nowrap .line .src { white-space: pre; word-break: normal; }
