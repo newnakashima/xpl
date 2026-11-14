@@ -21,7 +21,11 @@ const child = spawn(npx, ["tsx", path.join(root, "server", "index.ts"), repo], {
 });
 setTimeout(() => {
   const url = `http://localhost:${port}`;
-  const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-  spawn(opener, [url], { stdio: "ignore", shell: process.platform === "win32" }).on("error", () => {});
+  const opener =
+    process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  spawn(opener, [url], { stdio: "ignore", shell: process.platform === "win32" }).on(
+    "error",
+    () => {},
+  );
 }, 1500);
 child.on("exit", (c) => process.exit(c ?? 0));

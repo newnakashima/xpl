@@ -14,8 +14,15 @@ test("prompts use language-specific budgets and include the selected language", 
 });
 
 test("small initial prompts include metadata, context, file IDs, and annotated code", () => {
-  const files = parseDiff("diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n");
-  const prompt = initialPrompt({ title: "Selected change", description: "Rationale", files, raw: "" });
+  const files = parseDiff(
+    "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n",
+  );
+  const prompt = initialPrompt({
+    title: "Selected change",
+    description: "Rationale",
+    files,
+    raw: "",
+  });
   assert.match(prompt, /# Diff to explain: Selected change/);
   assert.match(prompt, /## Context\nRationale/);
   assert.match(prompt, /## Files \(1\)/);
@@ -26,7 +33,12 @@ test("small initial prompts include metadata, context, file IDs, and annotated c
 test("large prompts retain the file index, omit oversized code, and bound contextual metadata", () => {
   const content = "x".repeat(INLINE_DIFF_LIMIT + 1);
   const files = parseDiff(`diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+${content}\n`);
-  const prompt = initialPrompt({ title: "Large", description: "d".repeat(8000) + "SHOULD_BE_TRUNCATED", files, raw: "" });
+  const prompt = initialPrompt({
+    title: "Large",
+    description: "d".repeat(8000) + "SHOULD_BE_TRUNCATED",
+    files,
+    raw: "",
+  });
   assert.match(prompt, /not inlined/);
   assert.match(prompt, /get_diff/);
   assert.match(prompt, /\[F1\].*F1H1/);

@@ -20,7 +20,8 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
   useEffect(() => {
     fetch("/api/config")
       .then(async (r) => {
-        if (!r.ok) throw new Error("設定を読み込めませんでした。サーバーの設定を確認してください。");
+        if (!r.ok)
+          throw new Error("設定を読み込めませんでした。サーバーの設定を確認してください。");
         return r.json();
       })
       .then((c) => {
@@ -67,8 +68,18 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
   }
 
   const tabs: { k: Kind; label: string; desc: string; cmd: string }[] = [
-    { k: "working", label: "作業中の変更", desc: "コミット前の変更と未追跡ファイル", cmd: "git diff HEAD" },
-    { k: "branch", label: "ブランチ比較", desc: "ブランチで加えた変更をまとめて読む", cmd: "base...head" },
+    {
+      k: "working",
+      label: "作業中の変更",
+      desc: "コミット前の変更と未追跡ファイル",
+      cmd: "git diff HEAD",
+    },
+    {
+      k: "branch",
+      label: "ブランチ比較",
+      desc: "ブランチで加えた変更をまとめて読む",
+      cmd: "base...head",
+    },
     { k: "commit", label: "コミット", desc: "1 つのコミットの変更を読む", cmd: "git show" },
     { k: "pr", label: "Pull Request", desc: "GitHub の Pull Request を読む", cmd: "gh pr diff" },
   ];
@@ -79,7 +90,10 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
         <header className="setup-head">
           <span className="logo">xpl</span>
           <h1>どの差分を読みますか？</h1>
-          <p className="lead">AI が差分を読んで、理解しやすい順に少しずつ解説します。1 ステップ読んだら OK で次へ。わからないところはその場で聞けます。</p>
+          <p className="lead">
+            AI が差分を読んで、理解しやすい順に少しずつ解説します。1 ステップ読んだら OK
+            で次へ。わからないところはその場で聞けます。
+          </p>
         </header>
 
         <div className="form-row">
@@ -102,7 +116,9 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
             {infoError && <div className="error">{infoError}</div>}
             {info && (
               <div className="repo-meta">
-                {info.root !== repoPath.replace(/\/+$/, "") && <span className="path">{info.root}</span>}
+                {info.root !== repoPath.replace(/\/+$/, "") && (
+                  <span className="path">{info.root}</span>
+                )}
                 <span>
                   ブランチ <b>{info.currentBranch}</b>
                 </span>
@@ -119,7 +135,12 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
             <div className="sources" role="radiogroup" aria-labelledby="source-label">
               {tabs.map((t) => (
                 <label key={t.k} className={"source " + (kind === t.k ? "on" : "")}>
-                  <input type="radio" name="source" checked={kind === t.k} onChange={() => setKind(t.k)} />
+                  <input
+                    type="radio"
+                    name="source"
+                    checked={kind === t.k}
+                    onChange={() => setKind(t.k)}
+                  />
                   <span className="name">{t.label}</span>
                   <span className="desc">{t.desc}</span>
                   <span className="cmd">{t.cmd}</span>
@@ -127,16 +148,29 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
               ))}
             </div>
             <div className="source-opts">
-              {kind === "working" && <div className="muted">{info ? `今の変更: ${info.workingSummary}` : ""}</div>}
+              {kind === "working" && (
+                <div className="muted">{info ? `今の変更: ${info.workingSummary}` : ""}</div>
+              )}
               {kind === "branch" && (
                 <div className="row">
                   <label className="inline">
                     比較元
-                    <input list="branches" value={base} spellCheck={false} onChange={(e) => setBase(e.target.value)} />
+                    <input
+                      list="branches"
+                      value={base}
+                      spellCheck={false}
+                      onChange={(e) => setBase(e.target.value)}
+                    />
                   </label>
                   <label className="inline">
                     比較先
-                    <input list="branches" value={head} spellCheck={false} placeholder="HEAD" onChange={(e) => setHead(e.target.value)} />
+                    <input
+                      list="branches"
+                      value={head}
+                      spellCheck={false}
+                      placeholder="HEAD"
+                      onChange={(e) => setHead(e.target.value)}
+                    />
                   </label>
                   <datalist id="branches">
                     {info?.branches.map((b) => (
@@ -157,7 +191,11 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
               {kind === "pr" && (
                 <>
                   {info?.prs.length ? (
-                    <select value={pr} onChange={(e) => setPr(e.target.value)} aria-label="Pull Request">
+                    <select
+                      value={pr}
+                      onChange={(e) => setPr(e.target.value)}
+                      aria-label="Pull Request"
+                    >
                       {info.prs.map((p) => (
                         <option key={p.number} value={p.number}>
                           #{p.number}　{p.title}（{p.headRefName}, @{p.author}）
@@ -167,11 +205,17 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
                   ) : null}
                   <label className="inline">
                     PR 番号
-                    <input value={pr} inputMode="numeric" onChange={(e) => setPr(e.target.value)} placeholder="123" />
+                    <input
+                      value={pr}
+                      inputMode="numeric"
+                      onChange={(e) => setPr(e.target.value)}
+                      placeholder="123"
+                    />
                   </label>
                   {info?.prError && !info.prs.length && (
                     <div className="muted">
-                      Pull Request の一覧を取得できませんでした。番号を直接入力するか、<code>gh auth login</code> を実行してください。
+                      Pull Request の一覧を取得できませんでした。番号を直接入力するか、
+                      <code>gh auth login</code> を実行してください。
                       <br />
                       <span className="small">{info.prError.slice(0, 200)}</span>
                     </div>
@@ -194,7 +238,13 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
             </label>
             <label>
               モデル
-              <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Codex の既定モデル" aria-label="Codex モデル" spellCheck={false} />
+              <input
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="Codex の既定モデル"
+                aria-label="Codex モデル"
+                spellCheck={false}
+              />
             </label>
           </div>
         </div>
@@ -206,8 +256,8 @@ export function Setup({ onStart }: { onStart: (id: string) => void }) {
           </button>
         </div>
         <p className="setup-note">
-          Codex CLI のログイン情報で動きます。未ログインなら <code>codex login</code> を実行してください。
-          {" "}AI はファイルを読むだけで、変更はしません。
+          Codex CLI のログイン情報で動きます。未ログインなら <code>codex login</code>{" "}
+          を実行してください。 AI はファイルを読むだけで、変更はしません。
         </p>
       </div>
     </div>

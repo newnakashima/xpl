@@ -21,23 +21,44 @@ async function withServer(mode: string, run: (url: string, repo: string) => Prom
   await chmod(executable, 0o755);
   const child = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
     cwd: root,
-    env: { ...process.env, PORT: "0", XPL_REPO: repo, XPL_CODEX_PATH: executable, XPL_USE_API_KEY: "", XPL_TEST_MODE: mode },
+    env: {
+      ...process.env,
+      PORT: "0",
+      XPL_REPO: repo,
+      XPL_CODEX_PATH: executable,
+      XPL_USE_API_KEY: "",
+      XPL_TEST_MODE: mode,
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stderr = "";
-  child.stderr.on("data", (data) => { stderr += data; });
+  child.stderr.on("data", (data) => {
+    stderr += data;
+  });
   const closed = once(child, "close");
   try {
     const url = await new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Server startup timed out: ${stderr}`)), 5000);
+      const timer = setTimeout(
+        () => reject(new Error(`Server startup timed out: ${stderr}`)),
+        5000,
+      );
       let output = "";
       child.stdout.on("data", (data) => {
         output += data;
         const match = output.match(/http:\/\/localhost:(\d+)/);
-        if (match) { clearTimeout(timer); resolve(`http://127.0.0.1:${match[1]}`); }
+        if (match) {
+          clearTimeout(timer);
+          resolve(`http://127.0.0.1:${match[1]}`);
+        }
       });
-      child.on("exit", () => { clearTimeout(timer); reject(new Error(`Server exited: ${stderr}`)); });
-      child.on("error", (error) => { clearTimeout(timer); reject(error); });
+      child.on("exit", () => {
+        clearTimeout(timer);
+        reject(new Error(`Server exited: ${stderr}`));
+      });
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
     });
     await run(url, repo);
   } finally {
@@ -49,15 +70,21 @@ async function withServer(mode: string, run: (url: string, repo: string) => Prom
 
 test("a session uses Codex by default, streams failure, rejects later actions with 410, and can be deleted", async () => {
   await withServer("fatal", async (url, repo) => {
-    const request = (endpoint: string, body?: unknown) => fetch(url + endpoint, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000),
-    });
+    const request = (endpoint: string, body?: unknown) =>
+      fetch(url + endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(5000),
+      });
     assert.deepEqual(await (await fetch(url + "/api/config")).json(), { defaultRepo: repo });
     const created = await request("/api/sessions", { repoPath: repo, source: { kind: "working" } });
     assert.equal(created.status, 200);
     const { id, files } = await created.json();
     assert.equal(files, 1);
-    const events = await fetch(`${url}/api/sessions/${id}/events`, { signal: AbortSignal.timeout(5000) });
+    const events = await fetch(`${url}/api/sessions/${id}/events`, {
+      signal: AbortSignal.timeout(5000),
+    });
     assert.equal(events.status, 200);
     const reader = events.body!.getReader();
     const decoder = new TextDecoder();
@@ -80,20 +107,30 @@ test("a session uses Codex by default, streams failure, rejects later actions wi
 
 test("questions use the viewed step for events and AI context without changing session progress", async () => {
   await withServer("question-context", async (url, repo) => {
-    const request = (endpoint: string, body?: unknown) => fetch(url + endpoint, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000),
-    });
+    const request = (endpoint: string, body?: unknown) =>
+      fetch(url + endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(5000),
+      });
     const created = await request("/api/sessions", { repoPath: repo, source: { kind: "working" } });
     assert.equal(created.status, 200);
     const { id } = await created.json();
     const endpoint = `/api/sessions/${id}`;
-    const response = await fetch(url + endpoint + "/events", { signal: AbortSignal.timeout(10000) });
+    const response = await fetch(url + endpoint + "/events", {
+      signal: AbortSignal.timeout(10000),
+    });
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let output = "";
     const until = async (predicate: (event: SessionEvent) => boolean) => {
       while (true) {
-        const events: SessionEvent[] = output.split("\n\n").slice(0, -1).filter((part) => part.startsWith("data: ")).map((part) => JSON.parse(part.slice(6)));
+        const events: SessionEvent[] = output
+          .split("\n\n")
+          .slice(0, -1)
+          .filter((part) => part.startsWith("data: "))
+          .map((part) => JSON.parse(part.slice(6)));
         const event = events.find(predicate);
         if (event) return event;
         const chunk = await reader.read();
@@ -104,14 +141,30 @@ test("questions use the viewed step for events and AI context without changing s
     try {
       await until((e) => e.type === "step" && e.index === 0);
       // Step 2 may already be prepared, but has not been revealed yet.
-      assert.equal((await request(endpoint + "/questions", { text: "質問", mode: "now", afterStep: 1 })).status, 400);
+      assert.equal(
+        (await request(endpoint + "/questions", { text: "質問", mode: "now", afterStep: 1 }))
+          .status,
+        400,
+      );
       await request(endpoint + "/next");
       await until((e) => e.type === "step" && e.index === 1);
 
       for (const afterStep of [-1, 0.5, 2, "0", null]) {
-        assert.equal((await request(endpoint + "/questions", { text: "質問", mode: "now", afterStep })).status, 400);
+        assert.equal(
+          (await request(endpoint + "/questions", { text: "質問", mode: "now", afterStep })).status,
+          400,
+        );
       }
-      assert.equal((await request(endpoint + "/questions", { text: "前のステップについて", mode: "now", afterStep: 0 })).status, 200);
+      assert.equal(
+        (
+          await request(endpoint + "/questions", {
+            text: "前のステップについて",
+            mode: "now",
+            afterStep: 0,
+          })
+        ).status,
+        200,
+      );
       const question = await until((e) => e.type === "question" && e.question.id === "Q1");
       assert.ok(question.type === "question");
       assert.equal(question.question.afterStep, 0);
@@ -120,13 +173,26 @@ test("questions use the viewed step for events and AI context without changing s
       assert.match(answer.blocks[0].markdown, /while reading step 1 "全体像"/);
 
       // Clients that omit the viewed step retain the latest-step default.
-      assert.equal((await request(endpoint + "/questions", { text: "最新のステップについて", mode: "now" })).status, 200);
+      assert.equal(
+        (await request(endpoint + "/questions", { text: "最新のステップについて", mode: "now" }))
+          .status,
+        200,
+      );
       const latest = await until((e) => e.type === "question" && e.question.id === "Q2");
       assert.ok(latest.type === "question");
       assert.equal(latest.question.afterStep, 1);
       await until((e) => e.type === "answer" && e.questionId === "Q2");
 
-      assert.equal((await request(endpoint + "/questions", { text: "あとで前のステップを確認", mode: "later", afterStep: 0 })).status, 200);
+      assert.equal(
+        (
+          await request(endpoint + "/questions", {
+            text: "あとで前のステップを確認",
+            mode: "later",
+            afterStep: 0,
+          })
+        ).status,
+        200,
+      );
       const deferred = await until((e) => e.type === "question" && e.question.id === "Q3");
       assert.ok(deferred.type === "question");
       assert.equal(deferred.question.afterStep, 0);
@@ -144,7 +210,8 @@ test("questions use the viewed step for events and AI context without changing s
 test("full-file API serves only registered files, including after the agent stops", async () => {
   await withServer("fatal", async (url, repo) => {
     const created = await fetch(url + "/api/sessions", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ repoPath: repo, source: { kind: "working" } }),
     });
     assert.equal(created.status, 200);
@@ -152,7 +219,9 @@ test("full-file API serves only registered files, including after the agent stop
     const endpoint = `${url}/api/sessions/${id}/files/`;
     const response = await fetch(endpoint + "F1");
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { rows: [{ kind: "add", newN: 1, text: "export const value = 1;" }] });
+    assert.deepEqual(await response.json(), {
+      rows: [{ kind: "add", newN: 1, text: "export const value = 1;" }],
+    });
     assert.equal((await fetch(endpoint + "missing")).status, 404);
     assert.equal((await fetch(endpoint + encodeURIComponent("../example.ts"))).status, 404);
     assert.equal((await fetch(`${url}/api/sessions/missing/files/F1`)).status, 404);
@@ -163,11 +232,24 @@ test("full-file API serves only registered files, including after the agent stop
 
 test("API accepts local origins and rejects foreign or lookalike origins", async () => {
   await withServer("", async (url) => {
-    for (const origin of [undefined, "http://localhost", "http://127.0.0.1:5173", "https://localhost:443"]) {
-      const response = await fetch(url + "/api/config", { headers: origin ? { Origin: origin } : {} });
+    for (const origin of [
+      undefined,
+      "http://localhost",
+      "http://127.0.0.1:5173",
+      "https://localhost:443",
+    ]) {
+      const response = await fetch(url + "/api/config", {
+        headers: origin ? { Origin: origin } : {},
+      });
       assert.equal(response.status, 200, origin ?? "no origin");
     }
-    for (const origin of ["https://example.com", "http://localhost.evil.example", "http://127.0.0.1.evil.example", "null", "file://localhost"]) {
+    for (const origin of [
+      "https://example.com",
+      "http://localhost.evil.example",
+      "http://127.0.0.1.evil.example",
+      "null",
+      "file://localhost",
+    ]) {
       const response = await fetch(url + "/api/config", { headers: { Origin: origin } });
       assert.equal(response.status, 403, origin);
       assert.deepEqual(await response.json(), { error: "forbidden origin" });
@@ -177,7 +259,13 @@ test("API accepts local origins and rejects foreign or lookalike origins", async
 
 test("every session endpoint returns JSON 404 for an unknown session", async () => {
   await withServer("", async (url) => {
-    for (const [suffix, method] of [["/events", "GET"], ["/files/F1", "GET"], ["/next", "POST"], ["/questions", "POST"], ["", "DELETE"]]) {
+    for (const [suffix, method] of [
+      ["/events", "GET"],
+      ["/files/F1", "GET"],
+      ["/next", "POST"],
+      ["/questions", "POST"],
+      ["", "DELETE"],
+    ]) {
       const response = await fetch(`${url}/api/sessions/unknown${suffix}`, { method });
       assert.equal(response.status, 404, suffix);
       assert.deepEqual(await response.json(), { error: "session not found" });
@@ -187,13 +275,22 @@ test("every session endpoint returns JSON 404 for an unknown session", async () 
 
 test("invalid repository requests and blank questions return errors without losing the session", async () => {
   await withServer("question-context", async (url, repo) => {
-    const post = (endpoint: string, body: unknown) => fetch(url + endpoint, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000),
+    const post = (endpoint: string, body: unknown) =>
+      fetch(url + endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(5000),
+      });
+    const invalid = await post("/api/sessions", {
+      repoPath: path.join(repo, "missing"),
+      source: { kind: "working" },
     });
-    const invalid = await post("/api/sessions", { repoPath: path.join(repo, "missing"), source: { kind: "working" } });
     assert.equal(invalid.status, 400);
     assert.match((await invalid.json()).error, /failed/);
-    const info = await fetch(url + "/api/repo?path=" + encodeURIComponent(path.join(repo, "missing")));
+    const info = await fetch(
+      url + "/api/repo?path=" + encodeURIComponent(path.join(repo, "missing")),
+    );
     assert.equal(info.status, 400);
     const created = await post("/api/sessions", { source: { kind: "working" } });
     assert.equal(created.status, 200);
@@ -203,9 +300,14 @@ test("invalid repository requests and blank questions return errors without losi
       assert.equal(response.status, 400);
       assert.deepEqual(await response.json(), { error: "empty question" });
     }
-    const valid = await post(`/api/sessions/${id}/questions`, { text: "  trimmed question  ", mode: "later" });
+    const valid = await post(`/api/sessions/${id}/questions`, {
+      text: "  trimmed question  ",
+      mode: "later",
+    });
     assert.equal(valid.status, 200);
-    const response = await fetch(`${url}/api/sessions/${id}/events`, { signal: AbortSignal.timeout(5000) });
+    const response = await fetch(`${url}/api/sessions/${id}/events`, {
+      signal: AbortSignal.timeout(5000),
+    });
     assert.match(response.headers.get("content-type")!, /text\/event-stream/);
     assert.equal(response.headers.get("cache-control"), "no-cache");
     const reader = response.body!.getReader();
@@ -218,18 +320,24 @@ test("invalid repository requests and blank questions return errors without losi
       }
       assert.match(output, /"text":"trimmed question"/);
       assert.match(output, /"id":"Q1"/);
-    } finally { await reader.cancel(); }
+    } finally {
+      await reader.cancel();
+    }
   });
 });
 
 test("SSE reconnection replays session history in order", async () => {
   await withServer("", async (url) => {
     const response = await fetch(url + "/api/sessions", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: { kind: "working" } }),
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: { kind: "working" } }),
     });
     const { id } = await response.json();
     const readFirstStep = async () => {
-      const stream = await fetch(`${url}/api/sessions/${id}/events`, { signal: AbortSignal.timeout(5000) });
+      const stream = await fetch(`${url}/api/sessions/${id}/events`, {
+        signal: AbortSignal.timeout(5000),
+      });
       const reader = stream.body!.getReader();
       const decoder = new TextDecoder();
       let output = "";
@@ -239,8 +347,13 @@ test("SSE reconnection replays session history in order", async () => {
           assert.equal(chunk.done, false);
           output += decoder.decode(chunk.value, { stream: true });
         }
-        return output.split("\n\n").filter((part) => part.startsWith("data: ")).map((part) => JSON.parse(part.slice(6)) as SessionEvent);
-      } finally { await reader.cancel(); }
+        return output
+          .split("\n\n")
+          .filter((part) => part.startsWith("data: "))
+          .map((part) => JSON.parse(part.slice(6)) as SessionEvent);
+      } finally {
+        await reader.cancel();
+      }
     };
     const first = await readFirstStep();
     const replay = await readFirstStep();

@@ -5,13 +5,21 @@ import { HtmlVisual, Mermaid } from "./Visuals";
 import { deferred } from "../test/helpers";
 
 vi.mock("mermaid", () => ({ default: { initialize: vi.fn(), render: vi.fn() } }));
-beforeEach(() => { vi.mocked(mermaid.render).mockReset(); });
+beforeEach(() => {
+  vi.mocked(mermaid.render).mockReset();
+});
 
 it("strips Mermaid fences and displays the rendered SVG", async () => {
-  vi.mocked(mermaid.render).mockResolvedValue({ svg: '<svg aria-label="diagram"></svg>', diagramType: "flowchart" });
-  render(<Mermaid code={'```mermaid\ngraph TD; A-->B\n```'} />);
+  vi.mocked(mermaid.render).mockResolvedValue({
+    svg: '<svg aria-label="diagram"></svg>',
+    diagramType: "flowchart",
+  });
+  render(<Mermaid code={"```mermaid\ngraph TD; A-->B\n```"} />);
   await act(async () => {});
-  expect(mermaid.render).toHaveBeenCalledWith(expect.stringMatching(/^m[a-zA-Z0-9]+$/), "graph TD; A-->B\n");
+  expect(mermaid.render).toHaveBeenCalledWith(
+    expect.stringMatching(/^m[a-zA-Z0-9]+$/),
+    "graph TD; A-->B\n",
+  );
   expect(screen.getByLabelText("diagram")).toBeTruthy();
 });
 
@@ -24,11 +32,15 @@ it("shows diagram errors alongside their source", async () => {
 
 it("ignores an older diagram response after its source changes", async () => {
   const first = deferred<{ svg: string; diagramType: string }>();
-  vi.mocked(mermaid.render).mockReturnValueOnce(first.promise).mockResolvedValueOnce({ svg: '<svg aria-label="new"></svg>', diagramType: "flowchart" });
+  vi.mocked(mermaid.render)
+    .mockReturnValueOnce(first.promise)
+    .mockResolvedValueOnce({ svg: '<svg aria-label="new"></svg>', diagramType: "flowchart" });
   const { rerender } = render(<Mermaid code="old source" />);
   rerender(<Mermaid code="new source" />);
   await act(async () => {});
-  await act(async () => first.resolve({ svg: '<svg aria-label="old"></svg>', diagramType: "flowchart" }));
+  await act(async () =>
+    first.resolve({ svg: '<svg aria-label="old"></svg>', diagramType: "flowchart" }),
+  );
   expect(screen.getByLabelText("new")).toBeTruthy();
   expect(screen.queryByLabelText("old")).toBeNull();
 });
@@ -42,7 +54,9 @@ it("sandboxes HTML visuals, restricts network access, and authenticates resize m
   expect(frame.style.height).toBe("420px");
   const token = JSON.parse(frame.srcdoc.match(/var t=(".*?");/)![1]);
   const send = (height: unknown, xplToken = token, source = frame.contentWindow) => {
-    act(() => window.dispatchEvent(new MessageEvent("message", { source, data: { height, xplToken } })));
+    act(() =>
+      window.dispatchEvent(new MessageEvent("message", { source, data: { height, xplToken } })),
+    );
   };
   send(700, "wrong token");
   send(700, token, window);

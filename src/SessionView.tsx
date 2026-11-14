@@ -45,21 +45,39 @@ function reducer(s: State, e: SessionEvent | { type: "reset" }): State {
     case "reset":
       return init;
     case "meta":
-      return { ...s, title: e.title, description: e.description, fileCount: e.fileCount, additions: e.additions, deletions: e.deletions };
+      return {
+        ...s,
+        title: e.title,
+        description: e.description,
+        fileCount: e.fileCount,
+        additions: e.additions,
+        deletions: e.deletions,
+      };
     case "status":
-      return { ...s, waiting: e.waiting, label: e.label, aiWorking: e.aiWorking, prepared: e.prepared };
+      return {
+        ...s,
+        waiting: e.waiting,
+        label: e.label,
+        aiWorking: e.aiWorking,
+        prepared: e.prepared,
+      };
     case "activity":
       return { ...s, activity: e.text };
     case "plan":
       return { ...s, overview: e.overview, plan: e.steps };
     case "step": {
-      const { type, ...step } = e;
-      return { ...s, steps: [...s.steps.filter((x) => x.index !== step.index), step].sort((a, b) => a.index - b.index) };
+      const { type: _type, ...step } = e;
+      return {
+        ...s,
+        steps: [...s.steps.filter((x) => x.index !== step.index), step].sort(
+          (a, b) => a.index - b.index,
+        ),
+      };
     }
     case "question":
       return { ...s, questions: [...s.questions, e.question] };
     case "answer": {
-      const { type, ...a } = e;
+      const { type: _type, ...a } = e;
       return {
         ...s,
         answers: { ...s.answers, [a.questionId]: a },
@@ -67,7 +85,11 @@ function reducer(s: State, e: SessionEvent | { type: "reset" }): State {
       };
     }
     case "phase":
-      return { ...s, phase: e.phase, ...(e.phase === "failed" ? { waiting: false, aiWorking: false } : {}) };
+      return {
+        ...s,
+        phase: e.phase,
+        ...(e.phase === "failed" ? { waiting: false, aiWorking: false } : {}),
+      };
     case "error":
       return { ...s, errors: [...s.errors, e.message] };
   }
@@ -88,7 +110,10 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
     es.onmessage = (m) => dispatch(JSON.parse(m.data));
     es.onerror = () => {
       if (es.readyState === EventSource.CLOSED) {
-        dispatch({ type: "error", message: "セッションに接続できません。差分を選び直してください。" });
+        dispatch({
+          type: "error",
+          message: "セッションに接続できません。差分を選び直してください。",
+        });
         dispatch({ type: "phase", phase: "failed" });
       }
     };
@@ -97,6 +122,7 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
 
   const lastStep = s.steps.length ? s.steps[s.steps.length - 1].index : -1;
   const total = s.plan.length;
+  const hasLaterQuestions = s.questions.some((q) => q.mode === "later");
 
   // A newly revealed step always becomes the view (it only arrives after OK).
   useEffect(() => {
@@ -104,8 +130,8 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
     setRequested(false);
   }, [lastStep]);
   useEffect(() => {
-    if ((s.phase === "final_qa" || s.phase === "finished") && s.questions.some((q) => q.mode === "later")) setView("qa");
-  }, [s.phase]);
+    if ((s.phase === "final_qa" || s.phase === "finished") && hasLaterQuestions) setView("qa");
+  }, [s.phase, hasLaterQuestions]);
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
   }, [view]);
@@ -143,7 +169,13 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT" || (e.target as HTMLElement)?.closest("button, a")) return;
+      if (
+        tag === "TEXTAREA" ||
+        tag === "INPUT" ||
+        tag === "SELECT" ||
+        (e.target as HTMLElement)?.closest("button, a")
+      )
+        return;
       if (e.key === "ArrowRight" || e.key === "Enter") {
         e.preventDefault();
         next();
@@ -159,7 +191,8 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  const stepQuestions = (idx: number) => s.questions.filter((q) => q.afterStep === idx && q.mode === "now");
+  const stepQuestions = (idx: number) =>
+    s.questions.filter((q) => q.afterStep === idx && q.mode === "now");
 
   let okLabel = "OK、次へ";
   if (reviewing) okLabel = "次のステップへ";
@@ -168,8 +201,12 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
   else if (s.phase === "final_qa") okLabel = "質問に回答しています";
   else if (s.phase === "finished") okLabel = "解説は終わりました";
   else if (requested) okLabel = "次のステップを準備しています";
-  else if (isLast) okLabel = laterPending.length ? `OK、まとめた質問 ${laterPending.length} 件へ` : "OK、解説を終える";
-  const okDisabled = !reviewing && (s.phase !== "stepping" || lastStep < 0 || requested || view === "qa");
+  else if (isLast)
+    okLabel = laterPending.length
+      ? `OK、まとめた質問 ${laterPending.length} 件へ`
+      : "OK、解説を終える";
+  const okDisabled =
+    !reviewing && (s.phase !== "stepping" || lastStep < 0 || requested || view === "qa");
 
   // group plan by section
   const sections: { name: string; items: { p: PlanStep; i: number }[] }[] = [];
@@ -233,7 +270,11 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
               {sections.map((sec, si) => (
                 <div key={si} className="section">
                   {sec.name && (
-                    <div className={"section-name " + (sec.items[0].i <= lastStep ? "reached" : "")}>{sec.name}</div>
+                    <div
+                      className={"section-name " + (sec.items[0].i <= lastStep ? "reached" : "")}
+                    >
+                      {sec.name}
+                    </div>
                   )}
                   <ol className="steps">
                     {sec.items.map(({ p, i }) => {
@@ -242,9 +283,18 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
                       return (
                         <li
                           key={i}
-                          className={[shown ? "reached" : "", i + 1 <= lastStep ? "next-reached" : "", view === i ? "current" : ""].join(" ")}
+                          className={[
+                            shown ? "reached" : "",
+                            i + 1 <= lastStep ? "next-reached" : "",
+                            view === i ? "current" : "",
+                          ].join(" ")}
                         >
-                          <button className="step-link" disabled={!shown} onClick={() => setView(i)} aria-current={view === i ? "step" : undefined}>
+                          <button
+                            className="step-link"
+                            disabled={!shown}
+                            onClick={() => setView(i)}
+                            aria-current={view === i ? "step" : undefined}
+                          >
                             <span className="num">{i + 1}</span>
                             <span className="t">{p.title}</span>
                             {nq > 0 && (
@@ -296,7 +346,9 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
             {s.phase === "failed" && (
               <div className="finished">
                 <p>解説を中断しました。差分を選び直して再開してください。</p>
-                <button className="btn" onClick={onExit}>差分を選び直す</button>
+                <button className="btn" onClick={onExit}>
+                  差分を選び直す
+                </button>
               </div>
             )}
             {view === "qa" ? (
@@ -307,14 +359,22 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
                 </div>
                 <h2>質問への回答</h2>
                 {laterQs.map((q) => (
-                  <QA key={q.id} q={q} a={s.answers[q.id]} failed={s.phase === "failed"} sessionId={id} />
+                  <QA
+                    key={q.id}
+                    q={q}
+                    a={s.answers[q.id]}
+                    failed={s.phase === "failed"}
+                    sessionId={id}
+                  />
                 ))}
                 {s.phase === "finished" && finished}
               </div>
             ) : step ? (
               <article className="step" key={step.index}>
                 <div className="step-kicker">
-                  {s.plan[step.index]?.section && <span className="sec">{s.plan[step.index].section}</span>}
+                  {s.plan[step.index]?.section && (
+                    <span className="sec">{s.plan[step.index].section}</span>
+                  )}
                   <span className="pos">
                     ステップ {step.index + 1} / {total}
                   </span>
@@ -322,7 +382,13 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
                 <h2>{step.title}</h2>
                 <Blocks blocks={step.blocks} sessionId={id} />
                 {stepQuestions(step.index).map((q) => (
-                  <QA key={q.id} q={q} a={s.answers[q.id]} failed={s.phase === "failed"} sessionId={id} />
+                  <QA
+                    key={q.id}
+                    q={q}
+                    a={s.answers[q.id]}
+                    failed={s.phase === "failed"}
+                    sessionId={id}
+                  />
                 ))}
                 {s.phase === "finished" && step.index === total - 1 && !laterQs.length && finished}
               </article>
@@ -350,9 +416,12 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
           ) : (
             <>
               <span className="now">
-                <span className="dot" /> {s.phase === "failed" ? "中断" : s.phase === "finished" ? "完了" : "あなたの番です"}
+                <span className="dot" />{" "}
+                {s.phase === "failed" ? "中断" : s.phase === "finished" ? "完了" : "あなたの番です"}
               </span>
-              {s.aiWorking && s.phase === "stepping" && <span>次のステップを先に用意しています</span>}
+              {s.aiWorking && s.phase === "stepping" && (
+                <span>次のステップを先に用意しています</span>
+              )}
               {!s.aiWorking && s.prepared > 0 && <span>{s.prepared} ステップ用意済み</span>}
             </>
           )}
@@ -374,7 +443,11 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
             ref={inputRef}
             value={text}
             aria-label="質問"
-            placeholder={mode === "now" ? "わからないところを質問する（⌘Enter で送信）" : "最後にまとめて聞きたいことを書いておく（⌘Enter で送信）"}
+            placeholder={
+              mode === "now"
+                ? "わからないところを質問する（⌘Enter で送信）"
+                : "最後にまとめて聞きたいことを書いておく（⌘Enter で送信）"
+            }
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -385,10 +458,18 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
           />
           <div className="ask-controls">
             <div className="seg" role="group" aria-label="質問するタイミング">
-              <button className={mode === "now" ? "on" : ""} aria-pressed={mode === "now"} onClick={() => setMode("now")}>
+              <button
+                className={mode === "now" ? "on" : ""}
+                aria-pressed={mode === "now"}
+                onClick={() => setMode("now")}
+              >
                 今すぐ聞く
               </button>
-              <button className={mode === "later" ? "on" : ""} aria-pressed={mode === "later"} onClick={() => setMode("later")}>
+              <button
+                className={mode === "later" ? "on" : ""}
+                aria-pressed={mode === "later"}
+                onClick={() => setMode("later")}
+              >
                 最後にまとめて
               </button>
             </div>
@@ -406,7 +487,17 @@ export function SessionView({ id, onExit }: { id: string; onExit: () => void }) 
   );
 }
 
-function QA({ q, a, failed, sessionId }: { q: Question; a?: Answer; failed?: boolean; sessionId: string }) {
+function QA({
+  q,
+  a,
+  failed,
+  sessionId,
+}: {
+  q: Question;
+  a?: Answer;
+  failed?: boolean;
+  sessionId: string;
+}) {
   return (
     <div className="qa">
       <div className="q">
@@ -418,7 +509,13 @@ function QA({ q, a, failed, sessionId }: { q: Question; a?: Answer; failed?: boo
           <Blocks blocks={a.blocks} sessionId={sessionId} />
         </div>
       ) : (
-        <div className="a pending">{failed ? "中断したため回答できませんでした" : q.mode === "later" ? "すべてのステップのあとに回答します" : "回答を書いています…"}</div>
+        <div className="a pending">
+          {failed
+            ? "中断したため回答できませんでした"
+            : q.mode === "later"
+              ? "すべてのステップのあとに回答します"
+              : "回答を書いています…"}
+        </div>
       )}
     </div>
   );

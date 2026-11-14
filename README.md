@@ -13,7 +13,7 @@ AI が大量に生成したコードを、人間が素早く・高い解像度�
 
 ## 必要なもの
 
-- Node.js 18+
+- Node.js 22.22.2 以降の22系、または24.15以降の偶数メジャー版（開発・テスト共通）
 - Codex CLI にログイン済み: `npm install -g @openai/codex` のあと `codex login`（app-server の dynamic tools 対応版が必要。0.166.0 で動作確認）
 - PR を使う場合は `gh` CLI（`gh auth login` 済み）
 
@@ -31,6 +31,24 @@ npm start -- /path/to/your/repo   # http://localhost:4777
 
 Codex でプラン作成・ステップ解説・質問回答を行います。
 モデル欄を空にすると Codex の既定モデルを使います。利用可能なモデル ID を直接指定することもできます。
+
+### Lint・フォーマット
+
+Rust 製の [Oxlint](https://oxc.rs/docs/guide/usage/linter.html) と [Oxfmt](https://oxc.rs/docs/guide/usage/formatter.html) を使います。Oxlint は TypeScript・React の正しさと Hooks の呼び出し・依存配列を検査し、Oxfmt はコード・CSS・HTML・JSON・Markdown・YAML を整形します。
+
+React Compiler は使用していないため、既存の状態初期化パターンに干渉する `react/immutability` と `react/set-state-in-effect` は無効にしています。
+
+```sh
+npm run lint                 # lint（警告も失敗として扱う）
+npm run lint:fix             # lint の自動修正
+npm run format              # 全体を整形
+npm run format:check        # 書き換えずに整形を確認
+npm run check               # lint と整形をまとめて確認
+```
+
+整形は2スペース・ダブルクォート・セミコロンあり・行幅100文字を基本にします。`node_modules`・`dist`・`coverage` と自動生成される lockfile は整形対象外です。エディターでは `.editorconfig` と各ツールの設定ファイルを利用できます。
+
+GitHub Actions では PR と `main` への push 時に lint・整形・型チェック・テスト・ビルドを実行します。
 
 ### テスト
 
@@ -78,12 +96,12 @@ npm run typecheck
 
 ### 環境変数
 
-| 変数 | 説明 |
-|---|---|
-| `PORT` | サーバーのポート（既定 4777） |
-| `XPL_REPO` | 既定のリポジトリパス |
-| `XPL_CODEX_MODEL` | Codex 用の既定モデル（未指定なら Codex の設定を使用） |
-| `XPL_CODEX_PATH` | Codex CLI の実行ファイル（既定 `codex`） |
+| 変数                | 説明                                                                                                |
+| ------------------- | --------------------------------------------------------------------------------------------------- |
+| `PORT`              | サーバーのポート（既定 4777）                                                                       |
+| `XPL_REPO`          | 既定のリポジトリパス                                                                                |
+| `XPL_CODEX_MODEL`   | Codex 用の既定モデル（未指定なら Codex の設定を使用）                                               |
+| `XPL_CODEX_PATH`    | Codex CLI の実行ファイル（既定 `codex`）                                                            |
 | `XPL_USE_API_KEY=1` | CLI に API キー環境変数を渡す（既定では `OPENAI_API_KEY` / `CODEX_API_KEY` を該当プロセスから除外） |
 
 ## 構成

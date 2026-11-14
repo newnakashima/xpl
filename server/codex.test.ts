@@ -40,12 +40,16 @@ function makeAgent(onActivity = (_text: string) => {}) {
   const seen: string[] = [];
   const errors: Error[] = [];
   const agent = new CodexAgent({
-    cwd: process.cwd(), instructions: "Read only.", onActivity,
+    cwd: process.cwd(),
+    instructions: "Read only.",
+    onActivity,
     onError: (error) => errors.push(error),
-    tools: [tool("record", "Record text", { value: z.string() }, async ({ value }) => {
+    tools: [
+      tool("record", "Record text", { value: z.string() }, async ({ value }) => {
         seen.push(value);
         return { content: [{ type: "text", text: "saved" }] };
-      })],
+      }),
+    ],
   });
   return { agent, seen, errors };
 }
@@ -60,16 +64,26 @@ test("Codex validates tool inputs, returns errors to the model, and continues th
     assert.deepEqual(seen, ["ok", "ok"]);
     assert.deepEqual(activities, ["rg example", "rg example"]);
     assert.deepEqual(errors, []);
-  } finally { agent.close(); }
+  } finally {
+    agent.close();
+  }
 });
 
-for (const [prompt, message] of [["fail", /model failed/], ["rpc-error", /start failed/], ["exit", /Codex が終了/], ["invalid-json", /不正な JSON/], ["error-and-exit", /specific startup failure/]] as const) {
+for (const [prompt, message] of [
+  ["fail", /model failed/],
+  ["rpc-error", /start failed/],
+  ["exit", /Codex が終了/],
+  ["invalid-json", /不正な JSON/],
+  ["error-and-exit", /specific startup failure/],
+] as const) {
   test(`Codex rejects a turn on ${prompt}`, async () => {
     const { agent } = makeAgent();
     try {
       await agent.start();
       await assert.rejects(agent.run(prompt), message);
-    } finally { agent.close(); }
+    } finally {
+      agent.close();
+    }
   });
 }
 
@@ -78,7 +92,9 @@ test("Codex refuses unsupported approval requests without hanging the turn", asy
   try {
     await agent.start();
     await agent.run("unknown-request");
-  } finally { agent.close(); }
+  } finally {
+    agent.close();
+  }
 });
 
 test("an unsuccessful turn keeps the Codex connection usable and blank lines are ignored", async () => {
@@ -89,7 +105,9 @@ test("an unsuccessful turn keeps the Codex connection usable and blank lines are
     await agent.run("blank-lines");
     await agent.run("validate-tools");
     assert.deepEqual(seen, ["ok"]);
-  } finally { agent.close(); }
+  } finally {
+    agent.close();
+  }
 });
 
 test("closing Codex rejects an active turn and prevents further requests", async () => {
@@ -127,9 +145,12 @@ test("model selection uses an explicit model, then XPL_CODEX_MODEL, then the Cod
 function waitFor(session: Session, predicate: (event: SessionEvent) => boolean) {
   if (session.events.some(predicate)) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => { session.off("event", listener); reject(new Error("Session event timed out")); }, 5000);
+    const timer = setTimeout(() => {
+      session.off("event", listener);
+      reject(new Error("Session event timed out"));
+    }, 5000);
     const listener = (event: SessionEvent) => {
-      if (event.type === "phase" && event.phase === "failed" || predicate(event)) {
+      if ((event.type === "phase" && event.phase === "failed") || predicate(event)) {
         clearTimeout(timer);
         session.off("event", listener);
         if (event.type === "phase" && event.phase === "failed") reject(new Error("Session failed"));
@@ -142,11 +163,31 @@ function waitFor(session: Session, predicate: (event: SessionEvent) => boolean) 
 
 function makeSession() {
   return new Session({
-    repoRoot: process.cwd(), language: "日本語",
-    diff: { title: "Example", raw: "", files: [{
-      id: "F1", oldPath: "example.ts", newPath: "example.ts", status: "modified", additions: 1, deletions: 1,
-      hunks: [{ id: "F1H1", header: "@@ -1 +1 @@", oldStart: 1, newStart: 1, lines: ["-const a = 1;", "+const a = 2;"] }],
-    }] },
+    repoRoot: process.cwd(),
+    language: "日本語",
+    diff: {
+      title: "Example",
+      raw: "",
+      files: [
+        {
+          id: "F1",
+          oldPath: "example.ts",
+          newPath: "example.ts",
+          status: "modified",
+          additions: 1,
+          deletions: 1,
+          hunks: [
+            {
+              id: "F1H1",
+              header: "@@ -1 +1 @@",
+              oldStart: 1,
+              newStart: 1,
+              lines: ["-const a = 1;", "+const a = 2;"],
+            },
+          ],
+        },
+      ],
+    },
   });
 }
 
@@ -165,8 +206,13 @@ test("Codex session plans, prepares steps, answers immediate and deferred questi
     assert.equal(session.plan.length, 2);
     assert.ok(session.questions.every((question) => question.answered));
     assert.equal(session.events.filter((e) => e.type === "answer").length, 2);
-    assert.equal(session.events.some((e) => e.type === "error"), false);
-  } finally { session.close(); }
+    assert.equal(
+      session.events.some((e) => e.type === "error"),
+      false,
+    );
+  } finally {
+    session.close();
+  }
 });
 
 for (const mode of ["fail-plan-once", "fail-prepare-once", "fail-question-once"]) {
@@ -182,15 +228,22 @@ for (const mode of ["fail-plan-once", "fail-prepare-once", "fail-question-once"]
       await waitFor(session, (e) => e.type === "step" && e.index === 1);
       assert.equal(session.isClosed, false);
       assert.equal(session.phase, "stepping");
-      assert.ok(session.events.some((e) => e.type === "error" && e.message.includes("model failed")));
-    } finally { session.close(); }
+      assert.ok(
+        session.events.some((e) => e.type === "error" && e.message.includes("model failed")),
+      );
+    } finally {
+      session.close();
+    }
   });
 }
 
 // Expected errors are part of these cases, so wait for the terminal phase directly.
 function waitForFailure(session: Session) {
   return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => { session.off("event", listener); reject(new Error("Failure phase timed out")); }, 5000);
+    const timer = setTimeout(() => {
+      session.off("event", listener);
+      reject(new Error("Failure phase timed out"));
+    }, 5000);
     const listener = (event: SessionEvent) => {
       if (event.type === "phase" && event.phase === "failed") {
         clearTimeout(timer);
@@ -220,9 +273,14 @@ for (const mode of ["empty-plan", "fatal", "empty-answer"]) {
       assert.equal(session.ask("もう一度", "now"), false);
       session.next();
       assert.equal(session.events.length, count);
-      assert.equal(session.events.some((e) => e.type === "phase" && e.phase === "finished"), false);
+      assert.equal(
+        session.events.some((e) => e.type === "phase" && e.phase === "finished"),
+        false,
+      );
       const status = session.events.filter((e) => e.type === "status").at(-1);
       assert.ok(status?.type === "status" && !status.waiting && !status.aiWorking);
-    } finally { session.close(); }
+    } finally {
+      session.close();
+    }
   });
 }

@@ -52,7 +52,15 @@ export interface Answer {
 export type Phase = "planning" | "stepping" | "final_qa" | "finished" | "failed";
 
 export type SessionEvent =
-  | { type: "meta"; title: string; description?: string; repo: string; fileCount: number; additions: number; deletions: number }
+  | {
+      type: "meta";
+      title: string;
+      description?: string;
+      repo: string;
+      fileCount: number;
+      additions: number;
+      deletions: number;
+    }
   | { type: "status"; waiting: boolean; label?: string; aiWorking: boolean; prepared: number }
   | { type: "activity"; text: string }
   | { type: "plan"; overview: string; steps: PlanStep[]; skipped_hunks: string[] }

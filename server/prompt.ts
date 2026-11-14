@@ -11,7 +11,9 @@ export const LIMITS = {
 
 export function proseLimits(lang: string) {
   const cjk = /日本|中文|한국|Japanese|Chinese|Korean/i.test(lang);
-  return cjk ? { soft: 200, hard: 360, answerHard: 900 } : { soft: 450, hard: 850, answerHard: 2000 };
+  return cjk
+    ? { soft: 200, hard: 360, answerHard: 900 }
+    : { soft: 450, hard: 850, answerHard: 2000 };
 }
 
 export function systemPrompt(lang: string) {

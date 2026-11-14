@@ -18,7 +18,9 @@ export class SessionRegistry {
     this.expire(entry);
   }
 
-  get(id: string) { return this.entries.get(id)?.session; }
+  get(id: string) {
+    return this.entries.get(id)?.session;
+  }
 
   subscribe(id: string) {
     const entry = this.entries.get(id);

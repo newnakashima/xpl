@@ -4,7 +4,11 @@ import { createInterface } from "node:readline";
 import { z } from "zod";
 import type { ToolDefinition } from "./tools.js";
 
-type Pending = { resolve: (value: any) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
+type Pending = {
+  resolve: (value: any) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+};
 
 /** The connection is usable again after a completed, unsuccessful turn. */
 export class CodexTurnError extends Error {}
@@ -19,14 +23,16 @@ export class CodexAgent {
   private stopped = false;
   private stderr = "";
 
-  constructor(private options: {
-    cwd: string;
-    model?: string;
-    instructions: string;
-    tools: ToolDefinition[];
-    onActivity: (text: string) => void;
-    onError: (error: Error) => void;
-  }) {}
+  constructor(
+    private options: {
+      cwd: string;
+      model?: string;
+      instructions: string;
+      tools: ToolDefinition[];
+      onActivity: (text: string) => void;
+      onError: (error: Error) => void;
+    },
+  ) {}
 
   async start() {
     const env = { ...process.env };
@@ -34,13 +40,21 @@ export class CodexAgent {
       delete env.OPENAI_API_KEY;
       delete env.CODEX_API_KEY;
     }
-    const child = this.process = spawn(process.env.XPL_CODEX_PATH || "codex", ["app-server"], {
+    const child = (this.process = spawn(process.env.XPL_CODEX_PATH || "codex", ["app-server"], {
       cwd: this.options.cwd,
       env,
       stdio: ["pipe", "pipe", "pipe"],
-    }) as ChildProcessWithoutNullStreams;
-    child.stderr.on("data", (data) => { this.stderr = (this.stderr + data).slice(-4000); });
-    child.on("error", (error) => this.fail(new Error(`Codex を起動できません。Codex CLI をインストールして codex login を実行してください。\n${error.message}`)));
+    }) as ChildProcessWithoutNullStreams);
+    child.stderr.on("data", (data) => {
+      this.stderr = (this.stderr + data).slice(-4000);
+    });
+    child.on("error", (error) =>
+      this.fail(
+        new Error(
+          `Codex を起動できません。Codex CLI をインストールして codex login を実行してください。\n${error.message}`,
+        ),
+      ),
+    );
     child.stdin.on("error", (error) => this.fail(error));
     const lines = createInterface({ input: child.stdout });
     lines.on("line", (line) => {
@@ -55,7 +69,8 @@ export class CodexAgent {
     // 'close' runs after stdout is drained, so final protocol errors are kept.
     child.on("close", (code, signal) => {
       lines.close();
-      if (!this.stopped) this.fail(new Error(`Codex が終了しました (${signal ?? code})。${this.stderr}`));
+      if (!this.stopped)
+        this.fail(new Error(`Codex が終了しました (${signal ?? code})。${this.stderr}`));
     });
 
     try {
@@ -68,9 +83,14 @@ export class CodexAgent {
       // External MCP tools are outside the filesystem sandbox. Disable inherited
       // integrations for this thread so this viewer cannot perform remote writes.
       const { config } = await this.request("config/read", { cwd: this.options.cwd });
-      const overrides: Record<string, unknown> = { web_search: "disabled", "features.multi_agent": false };
-      for (const name of Object.keys(config.mcp_servers ?? {})) overrides[`mcp_servers.${name}.enabled`] = false;
-      for (const name of Object.keys(config.plugins ?? {})) overrides[`plugins.${name}.enabled`] = false;
+      const overrides: Record<string, unknown> = {
+        web_search: "disabled",
+        "features.multi_agent": false,
+      };
+      for (const name of Object.keys(config.mcp_servers ?? {}))
+        overrides[`mcp_servers.${name}.enabled`] = false;
+      for (const name of Object.keys(config.plugins ?? {}))
+        overrides[`plugins.${name}.enabled`] = false;
       overrides["features.apps"] = false;
 
       const result = await this.request("thread/start", {
@@ -101,7 +121,7 @@ export class CodexAgent {
     // Register completion before sending: very short turns may finish before
     // the turn/start response is delivered.
     await new Promise<void>((resolve, reject) => {
-      const active = this.active = { resolve, reject };
+      const active = (this.active = { resolve, reject });
       this.request("turn/start", {
         threadId: this.threadId,
         input: [{ type: "text", text }],
@@ -127,8 +147,9 @@ export class CodexAgent {
         reject(new Error(`Codex ${method} がタイムアウトしました。`));
       }, 60_000);
       this.pending.set(id, { resolve, reject, timer });
-      try { this.send({ id, method, params }); }
-      catch (error) {
+      try {
+        this.send({ id, method, params });
+      } catch (error) {
         clearTimeout(timer);
         this.pending.delete(id);
         reject(error);
@@ -140,7 +161,14 @@ export class CodexAgent {
     if (this.stopped) return;
     if (message.method && message.id != null) {
       if (message.method !== "item/tool/call") {
-        this.send({ id: message.id, error: { code: -32601, message: "xpl supports only its read-only viewer tools; interactive requests are unavailable." } });
+        this.send({
+          id: message.id,
+          error: {
+            code: -32601,
+            message:
+              "xpl supports only its read-only viewer tools; interactive requests are unavailable.",
+          },
+        });
         return;
       }
       const { tool: name, arguments: args, threadId } = message.params;
@@ -152,11 +180,18 @@ export class CodexAgent {
         if (!tool) throw new Error(`Unknown xpl tool: ${name}`);
         const result = await tool.handler(args);
         success = !result.isError;
-        text = result.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
+        text = result.content
+          .filter((c) => c.type === "text")
+          .map((c) => c.text)
+          .join("\n");
       } catch (error) {
         text = String(error instanceof Error ? error.message : error);
       }
-      if (!this.stopped) this.send({ id: message.id, result: { success, contentItems: [{ type: "inputText", text }] } });
+      if (!this.stopped)
+        this.send({
+          id: message.id,
+          result: { success, contentItems: [{ type: "inputText", text }] },
+        });
     } else if (message.id != null) {
       const pending = this.pending.get(message.id);
       if (!pending) return;
@@ -173,7 +208,8 @@ export class CodexAgent {
     } else if (message.method === "item/started") {
       const item = message.params.item;
       if (item.type === "commandExecution") this.options.onActivity(item.command);
-      else if (item.type === "dynamicToolCall" && item.tool === "get_diff") this.options.onActivity("diff を取得中");
+      else if (item.type === "dynamicToolCall" && item.tool === "get_diff")
+        this.options.onActivity("diff を取得中");
     }
   }
 

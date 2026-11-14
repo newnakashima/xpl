@@ -43,7 +43,7 @@ export function Mermaid({ code }: { code: string }) {
       .render(id, src)
       .then((r) => alive && setSvg(r.svg))
       .catch((e) => {
-        alive && setError(String(e?.message ?? e));
+        if (alive) setError(String(e?.message ?? e));
         document.getElementById("d" + id)?.remove();
       });
     return () => {
@@ -69,7 +69,11 @@ export function HtmlVisual({ code }: { code: string }) {
   const token = useId();
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
-      if (e.source === ref.current?.contentWindow && e.data?.xplToken === token && typeof e.data.height === "number") {
+      if (
+        e.source === ref.current?.contentWindow &&
+        e.data?.xplToken === token &&
+        typeof e.data.height === "number"
+      ) {
         setHeight(Math.min(Math.max(e.data.height + 4, 160), 900));
       }
     };
