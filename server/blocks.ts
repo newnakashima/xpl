@@ -8,12 +8,20 @@ export type { Row } from "./file-rows.js";
 /* ---------- Schema the AI writes ---------- */
 
 const Note = z.object({
-  line: z.number().int().describe("Line number the note attaches to (new-file numbers; old-file numbers for view 'old')"),
+  line: z
+    .number()
+    .int()
+    .describe(
+      "Line number the note attaches to (new-file numbers; old-file numbers for view 'old')",
+    ),
   text: z.string().describe("Very short annotation (one phrase)"),
 });
 
 export const BlockSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("text"), markdown: z.string().describe("1-3 short sentences or bullets") }),
+  z.object({
+    type: z.literal("text"),
+    markdown: z.string().describe("1-3 short sentences or bullets"),
+  }),
   z.object({
     type: z.literal("callout"),
     tone: z.enum(["info", "tip", "risk"]),
@@ -22,14 +30,23 @@ export const BlockSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("code"),
     hunk_id: z.string(),
-    start: z.number().int().optional().describe("First line (new-file numbers; old-file for view 'old'). Omit for whole hunk"),
+    start: z
+      .number()
+      .int()
+      .optional()
+      .describe("First line (new-file numbers; old-file for view 'old'). Omit for whole hunk"),
     end: z.number().int().optional(),
     view: z
       .enum(["new", "diff", "split", "old"])
       .optional()
-      .describe("new = resulting code with added lines marked (best for additions); diff = unified; split = before | after side by side (best for rewrites); old = removed code"),
+      .describe(
+        "new = resulting code with added lines marked (best for additions); diff = unified; split = before | after side by side (best for rewrites); old = removed code",
+      ),
     highlight: z.array(z.number().int()).optional().describe("Lines to emphasize"),
-    notes: z.array(Note).optional().describe("Inline annotations next to specific lines — prefer these over prose"),
+    notes: z
+      .array(Note)
+      .optional()
+      .describe("Inline annotations next to specific lines — prefer these over prose"),
     caption: z.string().optional(),
   }),
   z.object({
@@ -72,11 +89,44 @@ export type Block =
   | { type: "html"; code: string; title?: string };
 
 const EXT_LANG: Record<string, string> = {
-  ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
-  py: "python", rb: "ruby", go: "go", rs: "rust", java: "java", kt: "kotlin", swift: "swift", php: "php",
-  c: "c", h: "c", cc: "cpp", cpp: "cpp", hpp: "cpp", cs: "csharp", scala: "scala", sh: "bash", zsh: "bash",
-  sql: "sql", json: "json", yml: "yaml", yaml: "yaml", toml: "ini", md: "markdown", html: "xml", vue: "xml",
-  xml: "xml", css: "css", scss: "scss", dart: "dart", lua: "lua", ex: "elixir", exs: "elixir",
+  ts: "typescript",
+  tsx: "typescript",
+  js: "javascript",
+  jsx: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  py: "python",
+  rb: "ruby",
+  go: "go",
+  rs: "rust",
+  java: "java",
+  kt: "kotlin",
+  swift: "swift",
+  php: "php",
+  c: "c",
+  h: "c",
+  cc: "cpp",
+  cpp: "cpp",
+  hpp: "cpp",
+  cs: "csharp",
+  scala: "scala",
+  sh: "bash",
+  zsh: "bash",
+  sql: "sql",
+  json: "json",
+  yml: "yaml",
+  yaml: "yaml",
+  toml: "ini",
+  md: "markdown",
+  html: "xml",
+  vue: "xml",
+  xml: "xml",
+  css: "css",
+  scss: "scss",
+  dart: "dart",
+  lua: "lua",
+  ex: "elixir",
+  exs: "elixir",
 };
 export function langOf(file: string) {
   const ext = file.split(".").pop()?.toLowerCase() ?? "";
@@ -120,11 +170,12 @@ export function resolveBlocks(input: BlockInput[], ctx: ResolveCtx): Block[] {
           // deleted rows are attributed to the position of the next new line
           let attributed = hit.h.newStart;
           rows = rows.filter((r) => {
-            const n = useOld ? r.oldN! : r.newN ?? attributed;
+            const n = useOld ? r.oldN! : (r.newN ?? attributed);
             if (r.newN != null) attributed = r.newN + 1;
             return n >= s && n <= e;
           });
-          if (!rows.length) throw new BlockError(`Range ${b.start}-${b.end} selects no lines in ${b.hunk_id}`);
+          if (!rows.length)
+            throw new BlockError(`Range ${b.start}-${b.end} selects no lines in ${b.hunk_id}`);
         }
         return {
           type: "code",
@@ -142,7 +193,8 @@ export function resolveBlocks(input: BlockInput[], ctx: ResolveCtx): Block[] {
       }
       case "context": {
         const abs = path.resolve(ctx.repoRoot, b.file);
-        if (!abs.startsWith(ctx.repoRoot + path.sep)) throw new BlockError(`File outside repo: ${b.file}`);
+        if (!abs.startsWith(ctx.repoRoot + path.sep))
+          throw new BlockError(`File outside repo: ${b.file}`);
         let text: string;
         try {
           text = fs.readFileSync(abs, "utf8");
@@ -185,7 +237,7 @@ export function measure(blocks: Block[]) {
         codeLines += Math.max(left, right);
       } else codeLines += b.rows.length;
       prose += b.notes.reduce((a, n) => a + n.text.length, 0) * 0.5;
-      prose += (b.caption?.length ?? 0);
+      prose += b.caption?.length ?? 0;
     } else if (b.type === "text" || b.type === "callout") prose += b.markdown.length;
   }
   return { codeLines, prose: Math.round(prose) };

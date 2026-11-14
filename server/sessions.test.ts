@@ -5,7 +5,11 @@ import { Session } from "./session.js";
 import { SessionRegistry } from "./sessions.js";
 
 function session() {
-  return new Session({ repoRoot: process.cwd(), language: "日本語", diff: { title: "test", raw: "", files: [] } });
+  return new Session({
+    repoRoot: process.cwd(),
+    language: "日本語",
+    diff: { title: "test", raw: "", files: [] },
+  });
 }
 
 test("an abandoned session releases its agent after the reconnect grace period", async () => {

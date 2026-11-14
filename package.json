@@ -2,11 +2,21 @@
   "name": "xpl",
   "version": "0.1.0",
   "description": "AI-guided step-by-step code diff explainer (Codex)",
+  "license": "MIT",
+  "bin": {
+    "xpl": "bin/xpl.mjs"
+  },
+  "type": "module",
   "scripts": {
     "dev": "concurrently -k -n server,web \"tsx watch server/index.ts\" \"vite\"",
     "build": "vite build",
     "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
+    "lint": "oxlint --deny-warnings .",
+    "lint:fix": "npm run lint -- --fix",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "check": "npm run lint && npm run format:check",
     "test": "npm run test:server && npm run test:ui",
     "test:server": "tsx --test server/*.test.ts",
     "test:ui": "vitest run",
@@ -14,7 +24,6 @@
     "test:coverage:server": "node --import tsx --test --experimental-test-coverage --test-coverage-include='server/*.ts' --test-coverage-exclude='server/*.test.ts' server/*.test.ts",
     "test:coverage:ui": "vitest run --coverage"
   },
-  "type": "module",
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/ibm-plex-sans-jp": "^5.3.1",
@@ -41,12 +50,10 @@
     "@vitest/coverage-v8": "^5.1.0",
     "concurrently": "^10.0.6",
     "jsdom": "^31.0.1",
+    "oxfmt": "0.78.0",
+    "oxlint": "1.93.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.1.0"
-  },
-  "bin": {
-    "xpl": "bin/xpl.mjs"
-  },
-  "license": "MIT"
+  }
 }

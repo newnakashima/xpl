@@ -33,7 +33,7 @@ const VIEW_LABEL: Record<CodeBlockT["view"], string> = {
 };
 
 function lineNo(r: Row, view: CodeBlockT["view"]) {
-  return view === "old" ? r.oldN : r.newN ?? r.oldN;
+  return view === "old" ? r.oldN : (r.newN ?? r.oldN);
 }
 
 function Lines({
@@ -58,15 +58,33 @@ function Lines({
     <div className={"lines " + (sideNotes ? "with-notes" : "")}>
       {rows.map((r, i) => {
         const n = side === "old" ? r.oldN : side === "new" ? r.newN : lineNo(r, view);
-        const ns = showNotes && n != null && !(r.kind === "del" && view !== "old") ? notes.get(n) : undefined;
-        const cls = ["line", `k-${r.kind}`, n != null && hl.has(n) && !(r.kind === "del" && view !== "old") ? "hl" : "", ns ? "has-note" : ""].join(" ");
+        const ns =
+          showNotes && n != null && !(r.kind === "del" && view !== "old")
+            ? notes.get(n)
+            : undefined;
+        const cls = [
+          "line",
+          `k-${r.kind}`,
+          n != null && hl.has(n) && !(r.kind === "del" && view !== "old") ? "hl" : "",
+          ns ? "has-note" : "",
+        ].join(" ");
         return (
           <Fragment key={i}>
             <div className={cls}>
               <span className="ln">{n ?? ""}</span>
-              <span className="sign">{view === "diff" ? (r.kind === "add" ? "+" : r.kind === "del" ? "−" : " ") : ""}</span>
+              <span className="sign">
+                {view === "diff" ? (r.kind === "add" ? "+" : r.kind === "del" ? "−" : " ") : ""}
+              </span>
               <code className="src" dangerouslySetInnerHTML={{ __html: html[i] || " " }} />
-              {sideNotes && <span className="note">{ns?.map((t, j) => <span key={j} className="note-pill">{t}</span>)}</span>}
+              {sideNotes && (
+                <span className="note">
+                  {ns?.map((t, j) => (
+                    <span key={j} className="note-pill">
+                      {t}
+                    </span>
+                  ))}
+                </span>
+              )}
             </div>
             {!sideNotes && ns && (
               <div className="note-below">
@@ -111,7 +129,13 @@ function CopyPathButton({ path }: { path: string }) {
       disabled={status === "copying"}
       onClick={() => void copy()}
     >
-      {status === "copied" ? "コピーしました" : status === "error" ? "コピーできませんでした" : status === "copying" ? "コピー中…" : "パスをコピー"}
+      {status === "copied"
+        ? "コピーしました"
+        : status === "error"
+          ? "コピーできませんでした"
+          : status === "copying"
+            ? "コピー中…"
+            : "パスをコピー"}
     </button>
   );
 }
@@ -132,7 +156,10 @@ export function CodeBlock({ block, sessionId }: { block: CodeBlockT; sessionId?:
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(fileId)}`, { signal: controller.signal });
+        const response = await fetch(
+          `/api/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(fileId)}`,
+          { signal: controller.signal },
+        );
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "全文を読み込めませんでした");
         if (!controller.signal.aborted) setFullRows(result.rows);
@@ -158,7 +185,10 @@ export function CodeBlock({ block, sessionId }: { block: CodeBlockT; sessionId?:
       <figcaption className="cb-head">
         <span className="cb-file">{block.file}</span>
         <div className="cb-actions">
-          <span className="cb-view">{expanded ? "全文 · " : ""}{VIEW_LABEL[view]}</span>
+          <span className="cb-view">
+            {expanded ? "全文 · " : ""}
+            {VIEW_LABEL[view]}
+          </span>
           <CopyPathButton key={block.filePath} path={block.filePath} />
           {sessionId && block.fileId && (
             <button
@@ -167,7 +197,10 @@ export function CodeBlock({ block, sessionId }: { block: CodeBlockT; sessionId?:
               aria-label="ファイルの全文表示"
               aria-pressed={showFull}
               title={showFull ? "解説の抜粋に戻す" : "ファイル全体を表示する"}
-              onClick={() => { setError(""); setShowFull((value) => !value); }}
+              onClick={() => {
+                setError("");
+                setShowFull((value) => !value);
+              }}
             >
               {showFull ? "抜粋表示" : "全文表示"}
             </button>
@@ -184,22 +217,46 @@ export function CodeBlock({ block, sessionId }: { block: CodeBlockT; sessionId?:
           </button>
         </div>
       </figcaption>
-      {showFull && !fullRows && <div className="cb-status" role="status">全文を読み込んでいます…</div>}
-      {error && <div className="cb-error" role="alert">{error}</div>}
+      {showFull && !fullRows && (
+        <div className="cb-status" role="status">
+          全文を読み込んでいます…
+        </div>
+      )}
+      {error && (
+        <div className="cb-error" role="alert">
+          {error}
+        </div>
+      )}
       {view === "split" ? (
         <div className="split">
           <div className="split-pane">
             <div className="split-label">変更前</div>
             {(() => {
               const xs = indexed.filter((x) => x.r.kind !== "add");
-              return <Lines rows={xs.map((x) => x.r)} html={xs.map((x) => x.h)} view="split" block={block} side="old" />;
+              return (
+                <Lines
+                  rows={xs.map((x) => x.r)}
+                  html={xs.map((x) => x.h)}
+                  view="split"
+                  block={block}
+                  side="old"
+                />
+              );
             })()}
           </div>
           <div className="split-pane">
             <div className="split-label">変更後</div>
             {(() => {
               const xs = indexed.filter((x) => x.r.kind !== "del");
-              return <Lines rows={xs.map((x) => x.r)} html={xs.map((x) => x.h)} view="split" block={block} side="new" />;
+              return (
+                <Lines
+                  rows={xs.map((x) => x.r)}
+                  html={xs.map((x) => x.h)}
+                  view="split"
+                  block={block}
+                  side="new"
+                />
+              );
             })()}
           </div>
         </div>

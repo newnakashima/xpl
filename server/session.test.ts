@@ -8,9 +8,17 @@ import type { FileDiff } from "./git.js";
 
 function file(hunks = 1, lines = 1): FileDiff {
   return {
-    id: "F1", oldPath: "example.ts", newPath: "example.ts", status: "modified", additions: hunks * lines, deletions: 0,
+    id: "F1",
+    oldPath: "example.ts",
+    newPath: "example.ts",
+    status: "modified",
+    additions: hunks * lines,
+    deletions: 0,
     hunks: Array.from({ length: hunks }, (_, i) => ({
-      id: `F1H${i + 1}`, header: `@@ -${i + 1},0 +${i + 1},${lines} @@`, oldStart: i + 1, newStart: i + 1,
+      id: `F1H${i + 1}`,
+      header: `@@ -${i + 1},0 +${i + 1},${lines} @@`,
+      oldStart: i + 1,
+      newStart: i + 1,
       lines: Array.from({ length: lines }, (_, j) => `+const value${j} = ${j};`),
     })),
   };
@@ -28,10 +36,16 @@ async function harness(t: TestContext, files = [file()], language = "日本語")
   t.mock.method(CodexAgent.prototype, "run", (text: string) => {
     assert.equal(pending, undefined, "Session must serialize AI turns");
     runs.push(text);
-    return new Promise<void>((resolve, reject) => { pending = { resolve, reject }; });
+    return new Promise<void>((resolve, reject) => {
+      pending = { resolve, reject };
+    });
   });
   const close = t.mock.method(CodexAgent.prototype, "close", () => {});
-  const session = new Session({ repoRoot: process.cwd(), language, diff: { title: "Example", description: "Context", raw: "", files } });
+  const session = new Session({
+    repoRoot: process.cwd(),
+    language,
+    diff: { title: "Example", description: "Context", raw: "", files },
+  });
   t.after(() => session.close());
   await session.start();
   const call = async (name: string, input: unknown) => {
@@ -43,14 +57,23 @@ async function harness(t: TestContext, files = [file()], language = "日本語")
     assert.ok(pending, "expected a running turn");
     const turn = pending;
     pending = undefined;
-    if (error) turn.reject(error); else turn.resolve();
+    if (error) turn.reject(error);
+    else turn.resolve();
     await setImmediate();
   };
-  const plan = async (count = 3) => call("submit_plan", {
-    overview: "Overview", steps: Array.from({ length: count }, (_, i) => ({ section: "Section", title: `Step ${i}`, hunk_ids: ["F1H1"] })),
-  });
-  const present = (index: number, markdown = "Explanation") => call("present_step", { index, title: `Step ${index}`, blocks: [{ type: "text", markdown }] });
-  const answer = (question_id: string, markdown = "Answer") => call("answer_question", { question_id, blocks: [{ type: "text", markdown }] });
+  const plan = async (count = 3) =>
+    call("submit_plan", {
+      overview: "Overview",
+      steps: Array.from({ length: count }, (_, i) => ({
+        section: "Section",
+        title: `Step ${i}`,
+        hunk_ids: ["F1H1"],
+      })),
+    });
+  const present = (index: number, markdown = "Explanation") =>
+    call("present_step", { index, title: `Step ${index}`, blocks: [{ type: "text", markdown }] });
+  const answer = (question_id: string, markdown = "Answer") =>
+    call("answer_question", { question_id, blocks: [{ type: "text", markdown }] });
   const shown = () => session.events.filter((e) => e.type === "step").map((e) => e.index);
   return { session, call, finish, plan, present, answer, shown, runs, close };
 }
@@ -59,8 +82,18 @@ test("an empty diff finishes without starting Codex and emits its metadata", asy
   const h = await harness(t, []);
   assert.equal(h.runs.length, 0);
   assert.equal(h.session.phase, "finished");
-  assert.deepEqual(h.session.events[0], { type: "meta", title: "Example", description: "Context", repo: process.cwd(), fileCount: 0, additions: 0, deletions: 0 });
-  assert.ok(h.session.events.some((e) => e.type === "error" && e.message.includes("差分がありません")));
+  assert.deepEqual(h.session.events[0], {
+    type: "meta",
+    title: "Example",
+    description: "Context",
+    repo: process.cwd(),
+    fileCount: 0,
+    additions: 0,
+    deletions: 0,
+  });
+  assert.ok(
+    h.session.events.some((e) => e.type === "error" && e.message.includes("差分がありません")),
+  );
 });
 
 test("plans request missing coverage once, strip unknown references, and cannot be replaced after acceptance", async (t) => {
@@ -68,12 +101,26 @@ test("plans request missing coverage once, strip unknown references, and cannot 
   assert.equal((await h.plan()).isError, true);
   assert.equal(h.session.phase, "planning");
   const accepted = await h.call("submit_plan", {
-    overview: "partial", steps: [{ section: "s", title: "t", hunk_ids: ["F1H1", "unknown"], line_ranges: [
-      { hunk_id: "F1H1", start: 1, end: 1 }, { hunk_id: "unknown", start: 1, end: 1 },
-    ] }],
+    overview: "partial",
+    steps: [
+      {
+        section: "s",
+        title: "t",
+        hunk_ids: ["F1H1", "unknown"],
+        line_ranges: [
+          { hunk_id: "F1H1", start: 1, end: 1 },
+          { hunk_id: "unknown", start: 1, end: 1 },
+        ],
+      },
+    ],
   });
   assert.ok(!accepted.isError);
-  assert.deepEqual(h.session.plan[0], { section: "s", title: "t", hunk_ids: ["F1H1"], line_ranges: [{ hunk_id: "F1H1", start: 1, end: 1 }] });
+  assert.deepEqual(h.session.plan[0], {
+    section: "s",
+    title: "t",
+    hunk_ids: ["F1H1"],
+    line_ranges: [{ hunk_id: "F1H1", start: 1, end: 1 }],
+  });
   assert.equal((await h.plan()).isError, true);
   assert.equal(h.session.events.filter((e) => e.type === "plan").length, 1);
 });
@@ -81,7 +128,8 @@ test("plans request missing coverage once, strip unknown references, and cannot 
 test("explicitly skipped hunks satisfy plan coverage", async (t) => {
   const h = await harness(t, [file(5)]);
   const result = await h.call("submit_plan", {
-    overview: "small example", steps: [{ section: "s", title: "t", hunk_ids: ["F1H1"] }],
+    overview: "small example",
+    steps: [{ section: "s", title: "t", hunk_ids: ["F1H1"] }],
     skipped_hunks: ["F1H2", "F1H3", "F1H4", "F1H5"],
   });
   assert.ok(!result.isError);
@@ -139,7 +187,10 @@ test("immediate questions run FIFO before further prefetch, while deferred quest
   await h.finish();
   assert.match(h.runs.at(-1)!, /Prepare step 3/);
   assert.equal(h.session.questions[2].answered, false);
-  assert.equal(h.runs.some((text) => text.includes("Question [Q3]")), false);
+  assert.equal(
+    h.runs.some((text) => text.includes("Question [Q3]")),
+    false,
+  );
 });
 
 test("deferred questions are answered together and a finished session can accept a follow-up", async (t) => {
@@ -168,7 +219,8 @@ test("questions may only reference revealed integer step indices and unknown ans
   const h = await harness(t);
   await h.plan(2);
   await h.present(0);
-  for (const index of [-1, 0.5, 1, NaN, Infinity]) assert.throws(() => h.session.ask("q", "now", index), RangeError);
+  for (const index of [-1, 0.5, 1, NaN, Infinity])
+    assert.throws(() => h.session.ask("q", "now", index), RangeError);
   assert.equal(h.session.questions.length, 0);
   assert.equal((await h.answer("missing")).isError, true);
   h.session.ask("valid", "later", 0);
@@ -191,7 +243,8 @@ for (const language of ["日本語", "English"]) {
 test("code line budgets and unresolved block errors allow a corrected step", async (t) => {
   const h = await harness(t, [file(1, 29)]);
   await h.plan(1);
-  const present = (hunk_id: string, end?: number) => h.call("present_step", { index: 0, title: "t", blocks: [{ type: "code", hunk_id, end }] });
+  const present = (hunk_id: string, end?: number) =>
+    h.call("present_step", { index: 0, title: "t", blocks: [{ type: "code", hunk_id, end }] });
   assert.equal((await present("missing")).isError, true);
   assert.equal((await present("F1H1")).isError, true);
   assert.ok(!(await present("F1H1", 28)).isError);
@@ -204,7 +257,15 @@ test("oversized answers are rejected once, and invalid blocks do not mark a ques
   await h.present(0);
   await h.finish();
   h.session.ask("question", "now");
-  assert.equal((await h.call("answer_question", { question_id: "Q1", blocks: [{ type: "code", hunk_id: "missing" }] })).isError, true);
+  assert.equal(
+    (
+      await h.call("answer_question", {
+        question_id: "Q1",
+        blocks: [{ type: "code", hunk_id: "missing" }],
+      })
+    ).isError,
+    true,
+  );
   assert.equal((await h.answer("Q1", "x".repeat(901))).isError, true);
   assert.equal(h.session.questions[0].answered, false);
   assert.ok(!(await h.answer("Q1", "x".repeat(901))).isError);

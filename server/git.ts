@@ -72,16 +72,30 @@ export interface RepoInfo {
 
 export async function getRepoInfo(p: string): Promise<RepoInfo> {
   const root = await resolveRepoRoot(p);
-  const currentBranch = (await git(root, ["rev-parse", "--abbrev-ref", "HEAD"], [0, 128]).catch(() => "")).trim();
-  const branchesOut = await git(root, ["for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes"]).catch(() => "");
+  const currentBranch = (
+    await git(root, ["rev-parse", "--abbrev-ref", "HEAD"], [0, 128]).catch(() => "")
+  ).trim();
+  const branchesOut = await git(root, [
+    "for-each-ref",
+    "--format=%(refname:short)",
+    "refs/heads",
+    "refs/remotes",
+  ]).catch(() => "");
   const branches = branchesOut
     .split("\n")
     .map((s) => s.trim())
     .filter((s) => s && !s.endsWith("/HEAD") && s !== "origin");
-  const defaultBase = ["origin/main", "main", "origin/master", "master", "origin/develop", "develop"].find((b) =>
-    branches.includes(b)
+  const defaultBase = [
+    "origin/main",
+    "main",
+    "origin/master",
+    "master",
+    "origin/develop",
+    "develop",
+  ].find((b) => branches.includes(b));
+  const logOut = await git(root, ["log", "-n", "40", "--format=%H%x1f%s%x1f%an%x1f%ar"]).catch(
+    () => "",
   );
-  const logOut = await git(root, ["log", "-n", "40", "--format=%H%x1f%s%x1f%an%x1f%ar"]).catch(() => "");
   const commits = logOut
     .split("\n")
     .filter(Boolean)
@@ -92,7 +106,11 @@ export async function getRepoInfo(p: string): Promise<RepoInfo> {
   let prs: RepoInfo["prs"] = [];
   let prError: string | undefined;
   try {
-    const out = await run("gh", ["pr", "list", "--limit", "50", "--json", "number,title,headRefName,author"], root);
+    const out = await run(
+      "gh",
+      ["pr", "list", "--limit", "50", "--json", "number,title,headRefName,author"],
+      root,
+    );
     prs = JSON.parse(out).map((p: any) => ({
       number: p.number,
       title: p.title,
@@ -155,12 +173,16 @@ export async function getDiff(repoPath: string, source: DiffSource): Promise<Dif
       raw = await git(root, ["diff", ...common, `${source.base}...${revision}`]);
       readFile = (file) => git(root, ["show", `${revision}:${file.newPath}`]);
       title = `${source.base}...${head}`;
-      const log = await git(root, ["log", "--format=- %s", `${source.base}..${head}`]).catch(() => "");
+      const log = await git(root, ["log", "--format=- %s", `${source.base}..${head}`]).catch(
+        () => "",
+      );
       if (log.trim()) description = `Commits:\n${log}`;
       break;
     }
     case "commit": {
-      const revision = (await git(root, ["rev-parse", "--verify", `${source.sha}^{commit}`])).trim();
+      const revision = (
+        await git(root, ["rev-parse", "--verify", `${source.sha}^{commit}`])
+      ).trim();
       raw = await git(root, ["show", ...common, "--format=", revision]);
       readFile = (file) => git(root, ["show", `${revision}:${file.newPath}`]);
       const meta = await git(root, ["show", "-s", "--format=%h %s%n%n%b", source.sha]);
@@ -171,7 +193,17 @@ export async function getDiff(repoPath: string, source: DiffSource): Promise<Dif
     case "pr": {
       raw = await run("gh", ["pr", "diff", String(source.number), "--color=never"], root);
       const meta = JSON.parse(
-        await run("gh", ["pr", "view", String(source.number), "--json", "title,body,headRefName,baseRefName,headRefOid,headRepository,headRepositoryOwner"], root)
+        await run(
+          "gh",
+          [
+            "pr",
+            "view",
+            String(source.number),
+            "--json",
+            "title,body,headRefName,baseRefName,headRefOid,headRepository,headRepositoryOwner",
+          ],
+          root,
+        ),
       );
       readFile = async (file) => {
         try {
@@ -180,8 +212,16 @@ export async function getDiff(repoPath: string, source: DiffSource): Promise<Dif
           // PR heads (including forks) need not be checked out or fetched locally.
           const repository = `${meta.headRepositoryOwner.login}/${meta.headRepository.name}`;
           const filePath = file.newPath.split("/").map(encodeURIComponent).join("/");
-          return run("gh", ["api", `repos/${repository}/contents/${filePath}?ref=${meta.headRefOid}`,
-            "-H", "Accept: application/vnd.github.raw+json"], root);
+          return run(
+            "gh",
+            [
+              "api",
+              `repos/${repository}/contents/${filePath}?ref=${meta.headRefOid}`,
+              "-H",
+              "Accept: application/vnd.github.raw+json",
+            ],
+            root,
+          );
         }
       };
       title = `PR #${source.number}: ${meta.title}`;
@@ -193,7 +233,8 @@ export async function getDiff(repoPath: string, source: DiffSource): Promise<Dif
   const files = all.filter((f) => !isNoise(displayPath(f)));
   const skipped = all.filter((f) => isNoise(displayPath(f)));
   if (skipped.length) {
-    description = `${description ?? ""}\n\n(Auto-excluded generated/lock files: ${skipped.map(displayPath).join(", ")})`.trim();
+    description =
+      `${description ?? ""}\n\n(Auto-excluded generated/lock files: ${skipped.map(displayPath).join(", ")})`.trim();
   }
   files.forEach((f, i) => {
     const id = `F${i + 1}`;
@@ -204,15 +245,22 @@ export async function getDiff(repoPath: string, source: DiffSource): Promise<Dif
     // The user may keep editing while reading. Do not mix those later edits
     // into the diff or its line numbers when they open the full file.
     const snapshots = new Map<string, string | Error>();
-    await Promise.all(files.filter((f) => f.status !== "deleted" && f.status !== "added" && f.status !== "binary").map(async (file) => {
-      try {
-        const abs = path.join(root, file.newPath);
-        const stat = await fs.lstat(abs);
-        snapshots.set(file.id, stat.isSymbolicLink() ? await fs.readlink(abs) : await fs.readFile(abs, "utf8"));
-      } catch {
-        snapshots.set(file.id, new Error(`ファイルを読み込めません: ${file.newPath}`));
-      }
-    }));
+    await Promise.all(
+      files
+        .filter((f) => f.status !== "deleted" && f.status !== "added" && f.status !== "binary")
+        .map(async (file) => {
+          try {
+            const abs = path.join(root, file.newPath);
+            const stat = await fs.lstat(abs);
+            snapshots.set(
+              file.id,
+              stat.isSymbolicLink() ? await fs.readlink(abs) : await fs.readFile(abs, "utf8"),
+            );
+          } catch {
+            snapshots.set(file.id, new Error(`ファイルを読み込めません: ${file.newPath}`));
+          }
+        }),
+    );
     readFile = async (file) => {
       const snapshot = snapshots.get(file.id);
       if (snapshot instanceof Error) throw snapshot;
@@ -360,7 +408,7 @@ export function fileSummary(files: FileDiff[]): string {
       (f) =>
         `[${f.id}] ${displayPath(f)} (${f.status}, +${f.additions} -${f.deletions}, hunks: ${f.hunks
           .map((h) => h.id)
-          .join(", ")})`
+          .join(", ")})`,
     )
     .join("\n");
 }

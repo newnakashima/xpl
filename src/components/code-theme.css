@@ -1,7 +1,26 @@
 /* Quieter syntax colors on top of highlight.js "github": keep diff/marker colors legible. */
-.lines .hljs-keyword, .lines .hljs-built_in { color: #8b3a62; }
-.lines .hljs-string, .lines .hljs-regexp { color: #2f6b3a; }
-.lines .hljs-title, .lines .hljs-title.function_ { color: #1b5e86; }
-.lines .hljs-number, .lines .hljs-literal { color: #9a5a00; }
-.lines .hljs-comment { color: #868b91; font-style: italic; }
-.lines .hljs-type, .lines .hljs-attr, .lines .hljs-property { color: #4a5aa8; }
+.lines .hljs-keyword,
+.lines .hljs-built_in {
+  color: #8b3a62;
+}
+.lines .hljs-string,
+.lines .hljs-regexp {
+  color: #2f6b3a;
+}
+.lines .hljs-title,
+.lines .hljs-title.function_ {
+  color: #1b5e86;
+}
+.lines .hljs-number,
+.lines .hljs-literal {
+  color: #9a5a00;
+}
+.lines .hljs-comment {
+  color: #868b91;
+  font-style: italic;
+}
+.lines .hljs-type,
+.lines .hljs-attr,
+.lines .hljs-property {
+  color: #4a5aa8;
+}

@@ -13,25 +13,44 @@ import { Session } from "./session.js";
 async function repository(t: TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), "xpl-file-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const git = async (...args: string[]) => (await promisify(execFile)("git", args, { cwd: root })).stdout.trim();
+  const git = async (...args: string[]) =>
+    (await promisify(execFile)("git", args, { cwd: root })).stdout.trim();
   await git("init", "-b", "main");
   await git("config", "user.name", "Test");
   await git("config", "user.email", "test@example.com");
   const save = (file: string, text: string) => writeFile(path.join(root, file), text);
-  const commit = async () => { await git("add", "."); return git("commit", "-m", "fixture"); };
+  const commit = async () => {
+    await git("add", ".");
+    return git("commit", "-m", "fixture");
+  };
   return { root, git, save, commit };
 }
 
-const original = Array.from({ length: 40 }, (_, i) => `const line${i + 1} = ${i + 1};`).join("\n") + "\n";
-const changed = original.replace("const line8 = 8;", "const line8 = 80;\nconst extra = true;").replace("const line30 = 30;\n", "");
+const original =
+  Array.from({ length: 40 }, (_, i) => `const line${i + 1} = ${i + 1};`).join("\n") + "\n";
+const changed = original
+  .replace("const line8 = 8;", "const line8 = 80;\nconst extra = true;")
+  .replace("const line30 = 30;\n", "");
 
 function assertVersions(rows: Row[], oldText: string, newText: string) {
   const before = rows.filter((r) => r.kind !== "add");
   const after = rows.filter((r) => r.kind !== "del");
-  assert.deepEqual(before.map((r) => r.text), textRows(oldText).map((r) => r.text));
-  assert.deepEqual(after.map((r) => r.text), textRows(newText).map((r) => r.text));
-  assert.deepEqual(before.map((r) => r.oldN), before.map((_, i) => i + 1));
-  assert.deepEqual(after.map((r) => r.newN), after.map((_, i) => i + 1));
+  assert.deepEqual(
+    before.map((r) => r.text),
+    textRows(oldText).map((r) => r.text),
+  );
+  assert.deepEqual(
+    after.map((r) => r.text),
+    textRows(newText).map((r) => r.text),
+  );
+  assert.deepEqual(
+    before.map((r) => r.oldN),
+    before.map((_, i) => i + 1),
+  );
+  assert.deepEqual(
+    after.map((r) => r.newN),
+    after.map((_, i) => i + 1),
+  );
 }
 
 test("full working files keep gaps, all hunks, line numbers, and the session-start snapshot", async (t) => {
@@ -49,7 +68,9 @@ test("full working files keep gaps, all hunks, line numbers, and the session-sta
   assert.equal(session.getFileRows("F1"), session.getFileRows("F1"));
   assert.equal(session.getFileRows("../../etc/passwd"), undefined);
   const blocks = resolveBlocks([{ type: "code", hunk_id: "F1H1", start: 8, end: 9 }], {
-    repoRoot: repo.root, files: diff.files, fullFiles: new Map([["F1", async () => rows]]),
+    repoRoot: repo.root,
+    files: diff.files,
+    fullFiles: new Map([["F1", async () => rows]]),
   });
   assert.ok(blocks[0].type === "code");
   assert.equal(blocks[0].fileId, "F1");
@@ -95,8 +116,15 @@ test("added and deleted files need no disk content, and renamed files retain bot
   assertVersions(fullFileRows(added, ""), "", "added\n\nlast line\n");
   assertVersions(fullFileRows(deleted, ""), "deleted\n\nlast line", "");
   assertVersions(fullFileRows(renamed, await diff.readFile!(renamed)), original, changed);
-  for (const [file, expectedPath] of [[added, "added.ts"], [deleted, "deleted.ts"], [renamed, "renamed.ts"]] as const) {
-    const [block] = resolveBlocks([{ type: "code", hunk_id: file.hunks[0].id }], { repoRoot: repo.root, files: diff.files });
+  for (const [file, expectedPath] of [
+    [added, "added.ts"],
+    [deleted, "deleted.ts"],
+    [renamed, "renamed.ts"],
+  ] as const) {
+    const [block] = resolveBlocks([{ type: "code", hunk_id: file.hunks[0].id }], {
+      repoRoot: repo.root,
+      files: diff.files,
+    });
     assert.ok(block.type === "code");
     assert.equal(block.filePath, expectedPath);
     if (file === renamed) assert.equal(block.file, "old.ts → renamed.ts");
@@ -107,12 +135,20 @@ test("context blocks register their own unchanged snapshot without a phantom tra
   const repo = await repository(t);
   await repo.save("context.ts", original);
   const fullFiles = new Map<string, () => Promise<Row[]>>();
-  const [block] = resolveBlocks([{ type: "context", file: "context.ts", start: 8, end: 9, notes: [{ line: 8, text: "注釈" }] }], {
-    repoRoot: repo.root, files: [], fullFiles,
-  });
+  const [block] = resolveBlocks(
+    [{ type: "context", file: "context.ts", start: 8, end: 9, notes: [{ line: 8, text: "注釈" }] }],
+    {
+      repoRoot: repo.root,
+      files: [],
+      fullFiles,
+    },
+  );
   assert.ok(block.type === "code" && block.fileId);
   assert.equal(block.filePath, "context.ts");
-  assert.deepEqual(block.rows.map((r) => r.newN), [8, 9]);
+  assert.deepEqual(
+    block.rows.map((r) => r.newN),
+    [8, 9],
+  );
   await repo.save("context.ts", "later\n");
   const rows = await fullFiles.get(block.fileId)!();
   assert.equal(rows.length, 40);
@@ -123,7 +159,9 @@ test("context blocks register their own unchanged snapshot without a phantom tra
 test("full files handle empty-range hunks and CRLF, and reject a mismatched snapshot", () => {
   const [file] = parseDiff("diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -2 +1,0 @@\n-removed\n");
   assertVersions(fullFileRows(file, "first\nthird\n"), "first\nremoved\nthird\n", "first\nthird\n");
-  const [crlf] = parseDiff("diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n first\r\n-old\r\n+new\r\n");
+  const [crlf] = parseDiff(
+    "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n first\r\n-old\r\n+new\r\n",
+  );
   assertVersions(fullFileRows(crlf, "first\r\nnew\r\n"), "first\r\nold\r\n", "first\r\nnew\r\n");
   assert.throws(() => fullFileRows(crlf, "different\n"), /一致しません/);
 });
@@ -169,10 +207,28 @@ else process.exit(1);
 
 test("a failed full-file read can be retried", async () => {
   let attempts = 0;
-  const file: FileDiff = { id: "F1", oldPath: "f", newPath: "f", status: "modified", additions: 0, deletions: 0, hunks: [] };
-  const session = new Session({ repoRoot: process.cwd(), language: "日本語", diff: {
-    title: "test", raw: "", files: [file], readFile: async () => { if (++attempts === 1) throw new Error("unavailable"); return "ok\n"; },
-  } });
+  const file: FileDiff = {
+    id: "F1",
+    oldPath: "f",
+    newPath: "f",
+    status: "modified",
+    additions: 0,
+    deletions: 0,
+    hunks: [],
+  };
+  const session = new Session({
+    repoRoot: process.cwd(),
+    language: "日本語",
+    diff: {
+      title: "test",
+      raw: "",
+      files: [file],
+      readFile: async () => {
+        if (++attempts === 1) throw new Error("unavailable");
+        return "ok\n";
+      },
+    },
+  });
   await assert.rejects(session.getFileRows("F1")!, /unavailable/);
   assert.deepEqual(await session.getFileRows("F1"), textRows("ok\n"));
   assert.equal(attempts, 2);

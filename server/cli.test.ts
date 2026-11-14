@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,12 +28,15 @@ async function launcher(t: TestContext, built: boolean) {
   }
   const log = path.join(root, "calls.jsonl");
   const npx = path.join(root, "bin", "npx");
-  await writeFile(npx, `#!${process.execPath}
+  await writeFile(
+    npx,
+    `#!${process.execPath}
 import fs from "node:fs";
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({args, cwd: process.cwd(), port: process.env.PORT}) + "\\n");
 process.exit(Number(args[0] === "vite" ? process.env.TEST_BUILD_EXIT || 0 : process.env.TEST_SERVER_EXIT || 0));
-`);
+`,
+  );
   // The shim is extensionless; ensure Node treats it as an ES module.
   await writeFile(path.join(root, "package.json"), '{"type":"module"}');
   await chmod(npx, 0o755);
@@ -38,11 +50,23 @@ process.exit(Number(args[0] === "vite" ? process.env.TEST_BUILD_EXIT || 0 : proc
     let code = 0;
     try {
       await promisify(execFile)(process.execPath, [entry, ...args], {
-        cwd: root, timeout: 5000,
-        env: { ...process.env, PORT: "", PATH: `${path.join(root, "bin")}${path.delimiter}${process.env.PATH}`, ...env },
+        cwd: root,
+        timeout: 5000,
+        env: {
+          ...process.env,
+          PORT: "",
+          PATH: `${path.join(root, "bin")}${path.delimiter}${process.env.PATH}`,
+          ...env,
+        },
       });
-    } catch (error: any) { if (typeof error.code !== "number") throw error; code = error.code; }
-    const calls = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    } catch (error: any) {
+      if (typeof error.code !== "number") throw error;
+      code = error.code;
+    }
+    const calls = (await readFile(log, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
     return { code, calls };
   };
   return { root, run };
@@ -52,9 +76,13 @@ test("CLI builds a missing UI, resolves the repository argument, and passes the 
   const cli = await launcher(t, false);
   const { code, calls } = await cli.run(["relative repo"], { PORT: "4888" });
   assert.equal(code, 0);
-  assert.deepEqual(calls.map((call) => call.args), [
-    ["vite", "build"], ["tsx", path.join(cli.root, "server", "index.ts"), path.join(cli.root, "relative repo")],
-  ]);
+  assert.deepEqual(
+    calls.map((call) => call.args),
+    [
+      ["vite", "build"],
+      ["tsx", path.join(cli.root, "server", "index.ts"), path.join(cli.root, "relative repo")],
+    ],
+  );
   assert.equal(calls[1].port, "4888");
   assert.ok(calls.every((call) => call.cwd === cli.root));
 });

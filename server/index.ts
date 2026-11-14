@@ -88,7 +88,10 @@ app.get("/api/sessions/:id/events", (req, res) => {
 app.post("/api/sessions/:id/next", (req, res) => {
   const s = getSession(req.params.id, res);
   if (!s) return;
-  if (s.isClosed) { res.status(410).json({ error: "セッションは中断されています。差分を選び直してください。" }); return; }
+  if (s.isClosed) {
+    res.status(410).json({ error: "セッションは中断されています。差分を選び直してください。" });
+    return;
+  }
   s.next();
   res.json({ ok: true });
 });
@@ -97,7 +100,10 @@ app.get("/api/sessions/:id/files/:fileId", async (req, res) => {
   const s = getSession(req.params.id, res);
   if (!s) return;
   const rows = s.getFileRows(req.params.fileId);
-  if (!rows) { res.status(404).json({ error: "file not found" }); return; }
+  if (!rows) {
+    res.status(404).json({ error: "file not found" });
+    return;
+  }
   try {
     res.json({ rows: await rows });
   } catch (error) {
@@ -108,7 +114,11 @@ app.get("/api/sessions/:id/files/:fileId", async (req, res) => {
 app.post("/api/sessions/:id/questions", (req, res) => {
   const s = getSession(req.params.id, res);
   if (!s) return;
-  const { text, mode, afterStep } = req.body as { text: string; mode: "now" | "later"; afterStep?: number };
+  const { text, mode, afterStep } = req.body as {
+    text: string;
+    mode: "now" | "later";
+    afterStep?: number;
+  };
   if (!text?.trim()) {
     res.status(400).json({ error: "empty question" });
     return;

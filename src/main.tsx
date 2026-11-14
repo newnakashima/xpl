@@ -16,7 +16,8 @@ function App() {
     history.replaceState(null, "", url);
   }, [id]);
   function exit() {
-    if (id) void fetch(`/api/sessions/${id}`, { method: "DELETE", keepalive: true }).catch(console.error);
+    if (id)
+      void fetch(`/api/sessions/${id}`, { method: "DELETE", keepalive: true }).catch(console.error);
     setId(null);
   }
   return id ? <SessionView id={id} onExit={exit} /> : <Setup onStart={setId} />;
@@ -25,5 +26,5 @@ function App() {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />
-  </StrictMode>
+  </StrictMode>,
 );
