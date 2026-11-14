@@ -160,3 +160,93 @@ test("full-file API serves only registered files, including after the agent stop
     assert.equal((await fetch(endpoint + "F1")).status, 404);
   });
 });
+
+test("API accepts local origins and rejects foreign or lookalike origins", async () => {
+  await withServer("", async (url) => {
+    for (const origin of [undefined, "http://localhost", "http://127.0.0.1:5173", "https://localhost:443"]) {
+      const response = await fetch(url + "/api/config", { headers: origin ? { Origin: origin } : {} });
+      assert.equal(response.status, 200, origin ?? "no origin");
+    }
+    for (const origin of ["https://example.com", "http://localhost.evil.example", "http://127.0.0.1.evil.example", "null", "file://localhost"]) {
+      const response = await fetch(url + "/api/config", { headers: { Origin: origin } });
+      assert.equal(response.status, 403, origin);
+      assert.deepEqual(await response.json(), { error: "forbidden origin" });
+    }
+  });
+});
+
+test("every session endpoint returns JSON 404 for an unknown session", async () => {
+  await withServer("", async (url) => {
+    for (const [suffix, method] of [["/events", "GET"], ["/files/F1", "GET"], ["/next", "POST"], ["/questions", "POST"], ["", "DELETE"]]) {
+      const response = await fetch(`${url}/api/sessions/unknown${suffix}`, { method });
+      assert.equal(response.status, 404, suffix);
+      assert.deepEqual(await response.json(), { error: "session not found" });
+    }
+  });
+});
+
+test("invalid repository requests and blank questions return errors without losing the session", async () => {
+  await withServer("question-context", async (url, repo) => {
+    const post = (endpoint: string, body: unknown) => fetch(url + endpoint, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000),
+    });
+    const invalid = await post("/api/sessions", { repoPath: path.join(repo, "missing"), source: { kind: "working" } });
+    assert.equal(invalid.status, 400);
+    assert.match((await invalid.json()).error, /failed/);
+    const info = await fetch(url + "/api/repo?path=" + encodeURIComponent(path.join(repo, "missing")));
+    assert.equal(info.status, 400);
+    const created = await post("/api/sessions", { source: { kind: "working" } });
+    assert.equal(created.status, 200);
+    const { id } = await created.json();
+    for (const text of ["", "  \n\t", undefined]) {
+      const response = await post(`/api/sessions/${id}/questions`, { text });
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), { error: "empty question" });
+    }
+    const valid = await post(`/api/sessions/${id}/questions`, { text: "  trimmed question  ", mode: "later" });
+    assert.equal(valid.status, 200);
+    const response = await fetch(`${url}/api/sessions/${id}/events`, { signal: AbortSignal.timeout(5000) });
+    assert.match(response.headers.get("content-type")!, /text\/event-stream/);
+    assert.equal(response.headers.get("cache-control"), "no-cache");
+    const reader = response.body!.getReader();
+    try {
+      let output = "";
+      while (!output.includes('"type":"question"')) {
+        const chunk = await reader.read();
+        assert.equal(chunk.done, false);
+        output += new TextDecoder().decode(chunk.value);
+      }
+      assert.match(output, /"text":"trimmed question"/);
+      assert.match(output, /"id":"Q1"/);
+    } finally { await reader.cancel(); }
+  });
+});
+
+test("SSE reconnection replays session history in order", async () => {
+  await withServer("", async (url) => {
+    const response = await fetch(url + "/api/sessions", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: { kind: "working" } }),
+    });
+    const { id } = await response.json();
+    const readFirstStep = async () => {
+      const stream = await fetch(`${url}/api/sessions/${id}/events`, { signal: AbortSignal.timeout(5000) });
+      const reader = stream.body!.getReader();
+      const decoder = new TextDecoder();
+      let output = "";
+      try {
+        while (!output.includes('"type":"step","index":0')) {
+          const chunk = await reader.read();
+          assert.equal(chunk.done, false);
+          output += decoder.decode(chunk.value, { stream: true });
+        }
+        return output.split("\n\n").filter((part) => part.startsWith("data: ")).map((part) => JSON.parse(part.slice(6)) as SessionEvent);
+      } finally { await reader.cancel(); }
+    };
+    const first = await readFirstStep();
+    const replay = await readFirstStep();
+    assert.equal(replay[0].type, "meta");
+    const stepIndex = first.findIndex((e) => e.type === "step");
+    assert.ok(stepIndex > 0);
+    assert.deepEqual(replay.slice(0, stepIndex + 1), first.slice(0, stepIndex + 1));
+  });
+});
