@@ -32,6 +32,32 @@ npm start -- /path/to/your/repo   # http://localhost:4777
 Codex でプラン作成・ステップ解説・質問回答を行います。
 モデル欄を空にすると Codex の既定モデルを使います。利用可能なモデル ID を直接指定することもできます。
 
+### テスト
+
+テストには Node.js 22.22.2 以降の22系、または24.15以降の偶数メジャー版を使用してください。
+
+```sh
+npm test                     # サーバーと画面の全テスト
+npm run test:server          # Node.js test runner: Git / セッション / API / CLI
+npm run test:ui              # Vitest + jsdom: React の描画と操作
+npm run test:coverage        # 両方のカバレッジを計測
+npm run typecheck
+```
+
+サーバーのカバレッジは端末に表示され、画面側の HTML レポートは `coverage/ui/index.html` に生成されます。
+
+主な検証対象:
+
+- 作業ツリー・ブランチ・コミット・PR の差分取得、hunk の解析、生成物の除外、選択時点のファイル内容
+- コードの表示形式・行範囲・注釈・文字数や行数の制限、ツール入力の検証
+- 解説プラン、ステップの先読みと表示、即時・保留質問、生成失敗時の再試行と終了
+- API のエラー応答、localhost origin の制限、SSE の履歴再送、セッションの解放
+- 差分選択、キーボード操作、質問送信、全文表示、折り返し、パスのコピー、URL からの復元
+- Markdown のサニタイズ、図の描画エラー、HTML 図の sandbox と高さ変更メッセージの検証
+- CLI のビルド判定、引数・ポートの引き渡し、失敗時の終了コード
+
+テストは一時 Git リポジトリと Codex / gh / CLI の代替プロセスを使い、AI や GitHub へ接続しません。画面テストでは HTTP と SSE、Mermaid の描画処理を置き換えて動作を検証します。実ブラウザでのレイアウトや Mermaid 自体の描画品質は対象外です。
+
 ### キーボード
 
 - `Enter` / `→`: OK（次へ）　`←`: 前のステップ　`/`: 質問欄へ　`⌘/Ctrl+Enter`: 質問送信
